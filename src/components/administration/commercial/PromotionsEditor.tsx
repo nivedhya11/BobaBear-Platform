@@ -36,10 +36,25 @@ import {
 } from "@/lib/administration/commercial-promotions";
 import {
   describeAdminFailure,
+  fieldErrorFromResult,
   MOBILE_AUTHORING_MESSAGE,
 } from "@/lib/administration/commercial-errors";
 import { parseInrToPaise } from "@/lib/administration/commercial-money";
 import { cn } from "@/lib/utils";
+import {
+  COPY_CANCEL,
+  COPY_OP_AUTO,
+  COPY_OP_COUPON,
+  COPY_OP_DELIVERY,
+  COPY_OP_DRAFT,
+  COPY_OP_GIFT,
+  COPY_OP_LIVE,
+  COPY_OP_ORDER,
+  COPY_OP_RETIRED,
+  COPY_RETIRE_BODY,
+  COPY_RETIRE_CONFIRM,
+  COPY_RETIRE_TITLE,
+} from "@/shared/promotions/operator-copy";
 
 import { ConsequenceReviewDialog } from "./ConsequenceReviewDialog";
 import type { CommercialCapabilities, CommercialContext } from "./commercial-types";
@@ -49,6 +64,19 @@ type PromotionsEditorProps = Readonly<{
   capabilities: CommercialCapabilities;
   authoringAllowed: boolean;
   onStatus: (message: string) => void;
+}>;
+
+type OfferBenefitType =
+  | "percentage_discount"
+  | "fixed_amount_discount"
+  | "delivery_fee_waiver"
+  | "complimentary_item";
+
+type RedemptionCounts = Readonly<{
+  reservedCount: number;
+  consumedCount: number;
+  releasedCount: number;
+  applicationCount: number;
 }>;
 
 type ReviewState = Readonly<{
@@ -88,11 +116,24 @@ export function PromotionsEditor(props: PromotionsEditorProps) {
   const [displayName, setDisplayName] = useState("");
   const [triggerType, setTriggerType] = useState<"automatic" | "coupon">("automatic");
   const [draftName, setDraftName] = useState("");
-  const [benefitType, setBenefitType] = useState<"percentage_discount" | "fixed_amount_discount">(
-    "percentage_discount",
-  );
+  const [benefitType, setBenefitType] = useState<OfferBenefitType>("percentage_discount");
   const [percentageBps, setPercentageBps] = useState("1000");
   const [fixedInr, setFixedInr] = useState("");
+  const [firstOrderOnly, setFirstOrderOnly] = useState(false);
+  const [modeDelivery, setModeDelivery] = useState(false);
+  const [modePickup, setModePickup] = useState(false);
+  const [timingAsap, setTimingAsap] = useState(false);
+  const [timingScheduled, setTimingScheduled] = useState(false);
+  const [stackingPolicy, setStackingPolicy] = useState("exclusive");
+  const [startsAt, setStartsAt] = useState("");
+  const [endsAt, setEndsAt] = useState("");
+  const [minInr, setMinInr] = useState("");
+  const [maxRedemptions, setMaxRedemptions] = useState("");
+  const [maxPerCustomer, setMaxPerCustomer] = useState("");
+  const [giftProductId, setGiftProductId] = useState("");
+  const [giftVariantId, setGiftVariantId] = useState("");
+  const [giftFieldError, setGiftFieldError] = useState<string | null>(null);
+  const [redemptionCounts, setRedemptionCounts] = useState<RedemptionCounts | null>(null);
   const [couponCode, setCouponCode] = useState("");
 
   const [review, setReview] = useState<ReviewState | null>(null);
@@ -136,7 +177,43 @@ export function PromotionsEditor(props: PromotionsEditorProps) {
     setBenefit(promoResult.data.benefit);
     setQualifierTargets(promoResult.data.qualifierTargets);
     setBenefitTargets(promoResult.data.benefitTargets);
-    setDraftName(promoResult.data.promotion.displayName);
+    setRedemptionCounts(promoResult.data.redemptionCounts);
+    const loaded = promoResult.data.promotion;
+    setDraftName(loaded.displayName);
+    setFirstOrderOnly(loaded.firstOrderOnly === true);
+    setModeDelivery(loaded.eligibleFulfilmentModes?.includes("DELIVERY") === true);
+    setModePickup(loaded.eligibleFulfilmentModes?.includes("PICKUP") === true);
+    setTimingAsap(loaded.eligibleFulfilmentTimings?.includes("ASAP") === true);
+    setTimingScheduled(loaded.eligibleFulfilmentTimings?.includes("SCHEDULED") === true);
+    setStackingPolicy(loaded.stackingPolicy);
+    setStartsAt(loaded.startsAt);
+    setEndsAt(loaded.endsAt ?? "");
+    setMinInr(
+      loaded.minimumQualifyingAmountPaise
+        ? (Number(loaded.minimumQualifyingAmountPaise) / 100).toString()
+        : "",
+    );
+    setMaxRedemptions(loaded.maximumRedemptions?.toString() ?? "");
+    setMaxPerCustomer(loaded.maximumRedemptionsPerCustomer?.toString() ?? "");
+    const loadedBenefit = promoResult.data.benefit as
+      | {
+          benefitType?: OfferBenefitType;
+          complimentaryProductId?: string | null;
+          complimentaryVariantId?: string | null;
+        }
+      | null;
+    if (loadedBenefit?.benefitType === "delivery_fee_waiver") {
+      setBenefitType("delivery_fee_waiver");
+    } else if (loadedBenefit?.benefitType === "complimentary_item") {
+      setBenefitType("complimentary_item");
+    } else if (loadedBenefit?.benefitType === "fixed_amount_discount") {
+      setBenefitType("fixed_amount_discount");
+    } else {
+      setBenefitType("percentage_discount");
+    }
+    setGiftProductId(loadedBenefit?.complimentaryProductId ?? "");
+    setGiftVariantId(loadedBenefit?.complimentaryVariantId ?? "");
+    setGiftFieldError(null);
     setActivationError(null);
     if (
       couponResult &&
@@ -262,9 +339,34 @@ export function PromotionsEditor(props: PromotionsEditorProps) {
   async function handleSaveDraft() {
     if (!canManagePromo || !context.brandId || !promotion) return;
     setBusy(true);
+    const modes = [
+      ...(modeDelivery ? (["DELIVERY"] as const) : []),
+      ...(modePickup ? (["PICKUP"] as const) : []),
+    ];
+    const timings = [
+      ...(timingAsap ? (["ASAP"] as const) : []),
+      ...(timingScheduled ? (["SCHEDULED"] as const) : []),
+    ];
+    const minPaise = minInr.trim() ? parseInrToPaise(minInr) : null;
+    if (minInr.trim() && minPaise === null) {
+      setBusy(false);
+      props.onStatus("Enter a valid minimum INR amount.");
+      return;
+    }
     const result = await savePromotionDraft(context.brandId, promotion.id, {
       expectedPromotionRevision: promotion.revision,
       displayName: draftName,
+      stackingPolicy,
+      startsAt: startsAt || undefined,
+      endsAt: endsAt ? endsAt : null,
+      minimumQualifyingAmountPaise: minPaise,
+      firstOrderOnly,
+      eligibleFulfilmentModes: modes.length > 0 ? modes : null,
+      eligibleFulfilmentTimings: timings.length > 0 ? timings : null,
+      maximumRedemptions: maxRedemptions.trim() ? Number.parseInt(maxRedemptions, 10) : null,
+      maximumRedemptionsPerCustomer: maxPerCustomer.trim()
+        ? Number.parseInt(maxPerCustomer, 10)
+        : null,
     });
     setBusy(false);
     if (!result.ok) {
@@ -278,6 +380,7 @@ export function PromotionsEditor(props: PromotionsEditorProps) {
   async function handleSaveBenefit() {
     if (!canManagePromo || !context.brandId || !promotion) return;
     setBusy(true);
+    setGiftFieldError(null);
     let result;
     if (benefitType === "percentage_discount") {
       const bps = Number.parseInt(percentageBps, 10);
@@ -291,7 +394,7 @@ export function PromotionsEditor(props: PromotionsEditorProps) {
         benefitType: "percentage_discount",
         percentageBps: bps,
       });
-    } else {
+    } else if (benefitType === "fixed_amount_discount") {
       const paise = parseInrToPaise(fixedInr);
       if (paise === null) {
         setBusy(false);
@@ -303,9 +406,25 @@ export function PromotionsEditor(props: PromotionsEditorProps) {
         benefitType: "fixed_amount_discount",
         fixedAmountPaise: paise,
       });
+    } else if (benefitType === "delivery_fee_waiver") {
+      result = await savePromotionBenefit(context.brandId, promotion.id, {
+        expectedPromotionRevision: promotion.revision,
+        benefitType: "delivery_fee_waiver",
+      });
+    } else {
+      result = await savePromotionBenefit(context.brandId, promotion.id, {
+        expectedPromotionRevision: promotion.revision,
+        benefitType: "complimentary_item",
+        complimentaryProductId: giftProductId.trim() || context.productId || null,
+        complimentaryVariantId: giftVariantId.trim() || context.variantId || null,
+      });
     }
     setBusy(false);
     if (!result.ok) {
+      const mapped = fieldErrorFromResult(result);
+      if (result.code === "PROMOTION_COMPLIMENTARY_INVALID") {
+        setGiftFieldError(mapped?.message ?? describeAdminFailure(result));
+      }
       props.onStatus(`${result.code}: ${describeAdminFailure(result)}`);
       return;
     }
@@ -410,7 +529,11 @@ export function PromotionsEditor(props: PromotionsEditorProps) {
       return;
     }
     setReview(null);
-    props.onStatus("Lifecycle effect applied.");
+    props.onStatus(
+      review.kind === "promotion" && review.proposedStatus === "retired"
+        ? COPY_OP_RETIRED
+        : "Lifecycle effect applied.",
+    );
     await loadList();
     await loadDetail();
   }
@@ -504,12 +627,16 @@ export function PromotionsEditor(props: PromotionsEditorProps) {
               <select
                 className={cn(enterpriseFieldClass)}
                 aria-label="Trigger type"
+                aria-describedby="trigger-type-help"
                 value={triggerType}
                 onChange={(e) => setTriggerType(e.target.value as "automatic" | "coupon")}
               >
                 <option value="automatic">automatic</option>
                 <option value="coupon">coupon</option>
               </select>
+              <span id="trigger-type-help" className="text-xs text-[var(--enterprise-muted,#C4D4A8)]">
+                {triggerType === "automatic" ? COPY_OP_AUTO : COPY_OP_COUPON}
+              </span>
             </label>
             <Button type="button" onClick={() => void handleCreatePromotion()}>
               Create
@@ -523,6 +650,13 @@ export function PromotionsEditor(props: PromotionsEditorProps) {
           <div className="flex flex-wrap items-center gap-2">
             <h3 className="text-base font-semibold">{promotion.displayName}</h3>
             <StatusBadge tone={statusTone(promotion.status)}>{promotion.status}</StatusBadge>
+            <span className="text-xs text-[var(--enterprise-muted,#C4D4A8)]">
+              {promotion.status === "active"
+                ? COPY_OP_LIVE
+                : promotion.status === "retired"
+                  ? COPY_OP_RETIRED
+                  : COPY_OP_DRAFT}
+            </span>
             <span className="text-xs text-[var(--enterprise-muted,#C4D4A8)]">
               Trigger: {promotion.triggerType}
             </span>
@@ -538,10 +672,123 @@ export function PromotionsEditor(props: PromotionsEditorProps) {
                 <input
                   className={cn(enterpriseFieldClass, "w-full")}
                   value={draftName}
+                  aria-label="Display name"
                   onChange={(e) => setDraftName(e.target.value)}
                 />
               </label>
-              <Button type="button" onClick={() => void handleSaveDraft()}>
+              <fieldset className="grid gap-3 sm:grid-cols-2" disabled={busy}>
+                <legend className="text-sm font-semibold">Eligibility</legend>
+                <label className="flex items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={firstOrderOnly}
+                    onChange={(e) => setFirstOrderOnly(e.target.checked)}
+                  />
+                  First order only
+                </label>
+                <label className="flex flex-col gap-1 text-sm">
+                  <span>Stacking posture</span>
+                  <select
+                    className={cn(enterpriseFieldClass)}
+                    aria-label="Stacking posture"
+                    value={stackingPolicy}
+                    onChange={(e) => setStackingPolicy(e.target.value)}
+                  >
+                    <option value="exclusive">exclusive</option>
+                    <option value="combinable">combinable</option>
+                  </select>
+                </label>
+                <fieldset className="space-y-1">
+                  <legend className="text-sm">Fulfilment mode</legend>
+                  <label className="flex items-center gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={modeDelivery}
+                      onChange={(e) => setModeDelivery(e.target.checked)}
+                    />
+                    Delivery
+                  </label>
+                  <label className="flex items-center gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={modePickup}
+                      onChange={(e) => setModePickup(e.target.checked)}
+                    />
+                    Pickup
+                  </label>
+                </fieldset>
+                <fieldset className="space-y-1">
+                  <legend className="text-sm">Timing</legend>
+                  <label className="flex items-center gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={timingAsap}
+                      onChange={(e) => setTimingAsap(e.target.checked)}
+                    />
+                    ASAP
+                  </label>
+                  <label className="flex items-center gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={timingScheduled}
+                      onChange={(e) => setTimingScheduled(e.target.checked)}
+                    />
+                    Scheduled
+                  </label>
+                </fieldset>
+                <label className="flex flex-col gap-1 text-sm">
+                  <span>Starts at</span>
+                  <input
+                    className={cn(enterpriseFieldClass)}
+                    aria-label="Starts at"
+                    value={startsAt}
+                    onChange={(e) => setStartsAt(e.target.value)}
+                  />
+                </label>
+                <label className="flex flex-col gap-1 text-sm">
+                  <span>Ends at</span>
+                  <input
+                    className={cn(enterpriseFieldClass)}
+                    aria-label="Ends at"
+                    value={endsAt}
+                    onChange={(e) => setEndsAt(e.target.value)}
+                  />
+                </label>
+              </fieldset>
+              <fieldset className="grid gap-3 sm:grid-cols-2" disabled={busy}>
+                <legend className="text-sm font-semibold">Limits</legend>
+                <label className="flex flex-col gap-1 text-sm">
+                  <span>Minimum INR amount</span>
+                  <input
+                    className={cn(enterpriseFieldClass)}
+                    aria-label="Minimum INR amount"
+                    inputMode="decimal"
+                    value={minInr}
+                    onChange={(e) => setMinInr(e.target.value)}
+                  />
+                </label>
+                <label className="flex flex-col gap-1 text-sm">
+                  <span>Maximum redemptions</span>
+                  <input
+                    className={cn(enterpriseFieldClass)}
+                    aria-label="Maximum redemptions"
+                    inputMode="numeric"
+                    value={maxRedemptions}
+                    onChange={(e) => setMaxRedemptions(e.target.value)}
+                  />
+                </label>
+                <label className="flex flex-col gap-1 text-sm">
+                  <span>Maximum redemptions per customer</span>
+                  <input
+                    className={cn(enterpriseFieldClass)}
+                    aria-label="Maximum redemptions per customer"
+                    inputMode="numeric"
+                    value={maxPerCustomer}
+                    onChange={(e) => setMaxPerCustomer(e.target.value)}
+                  />
+                </label>
+              </fieldset>
+              <Button type="button" disabled={busy} onClick={() => void handleSaveDraft()}>
                 Save draft
               </Button>
 
@@ -610,39 +857,88 @@ export function PromotionsEditor(props: PromotionsEditorProps) {
                   className={cn(enterpriseFieldClass)}
                   value={benefitType}
                   aria-label="Benefit type"
-                  onChange={(e) =>
-                    setBenefitType(e.target.value as "percentage_discount" | "fixed_amount_discount")
-                  }
+                  onChange={(e) => setBenefitType(e.target.value as OfferBenefitType)}
                 >
                   <option value="percentage_discount">Percentage discount</option>
                   <option value="fixed_amount_discount">Fixed amount discount</option>
+                  <option value="delivery_fee_waiver">Delivery fee waiver</option>
+                  <option value="complimentary_item">Complimentary item</option>
                 </select>
                 {benefitType === "percentage_discount" ? (
                   <label className="flex flex-col gap-1 text-sm">
                     <span>Percentage (basis points, 1000 = 10%)</span>
                     <input
                       className={cn(enterpriseFieldClass)}
+                      aria-label="Percentage basis points"
                       value={percentageBps}
                       onChange={(e) => setPercentageBps(e.target.value)}
                     />
+                    <span className="text-xs text-[var(--enterprise-muted,#C4D4A8)]">{COPY_OP_ORDER}</span>
                   </label>
-                ) : (
+                ) : null}
+                {benefitType === "fixed_amount_discount" ? (
                   <label className="flex flex-col gap-1 text-sm">
                     <span>Fixed INR amount</span>
                     <input
                       className={cn(enterpriseFieldClass)}
                       value={fixedInr}
                       inputMode="decimal"
+                      aria-label="Fixed INR amount"
                       onChange={(e) => setFixedInr(e.target.value)}
                     />
+                    <span className="text-xs text-[var(--enterprise-muted,#C4D4A8)]">{COPY_OP_ORDER}</span>
                   </label>
-                )}
-                <Button type="button" onClick={() => void handleSaveBenefit()}>
+                ) : null}
+                {benefitType === "delivery_fee_waiver" ? (
+                  <p className="text-sm text-[var(--enterprise-text-secondary,#EBD9A6)]">{COPY_OP_DELIVERY}</p>
+                ) : null}
+                {benefitType === "complimentary_item" ? (
+                  <fieldset className="space-y-2">
+                    <legend className="text-sm">{COPY_OP_GIFT}</legend>
+                    <label className="flex flex-col gap-1 text-sm">
+                      <span>Complimentary product id</span>
+                      <input
+                        className={cn(enterpriseFieldClass)}
+                        aria-label="Complimentary product id"
+                        aria-invalid={giftFieldError ? true : undefined}
+                        aria-describedby={giftFieldError ? "gift-invalid-reason" : undefined}
+                        value={giftProductId}
+                        onChange={(e) => setGiftProductId(e.target.value)}
+                      />
+                    </label>
+                    <label className="flex flex-col gap-1 text-sm">
+                      <span>Complimentary variant id</span>
+                      <input
+                        className={cn(enterpriseFieldClass)}
+                        aria-label="Complimentary variant id"
+                        aria-invalid={giftFieldError ? true : undefined}
+                        aria-describedby={giftFieldError ? "gift-invalid-reason" : undefined}
+                        value={giftVariantId}
+                        onChange={(e) => setGiftVariantId(e.target.value)}
+                      />
+                    </label>
+                    {giftFieldError ? (
+                      <p id="gift-invalid-reason" role="alert" className="text-sm">
+                        {giftFieldError}
+                      </p>
+                    ) : null}
+                  </fieldset>
+                ) : null}
+                <Button type="button" disabled={busy} onClick={() => void handleSaveBenefit()}>
                   Save benefit
                 </Button>
               </fieldset>
             </>
           ) : null}
+
+          <div
+            className="text-sm text-[var(--enterprise-text-secondary,#EBD9A6)]"
+            data-testid="redemption-counts"
+          >
+            Applications: {redemptionCounts?.applicationCount ?? 0}. Reserved:{" "}
+            {redemptionCounts?.reservedCount ?? 0}. Consumed: {redemptionCounts?.consumedCount ?? 0}.
+            Released: {redemptionCounts?.releasedCount ?? 0}.
+          </div>
 
           <div className="text-sm text-[var(--enterprise-text-secondary,#EBD9A6)]">
             Current benefit:{" "}
@@ -756,19 +1052,35 @@ export function PromotionsEditor(props: PromotionsEditorProps) {
 
       <ConsequenceReviewDialog
         open={review !== null}
-        title="Review lifecycle effect"
-        draftLabel={review?.draftLabel ?? ""}
+        title={
+          review?.kind === "promotion" && review.proposedStatus === "retired"
+            ? COPY_RETIRE_TITLE
+            : "Review lifecycle effect"
+        }
+        draftLabel={
+          review?.kind === "promotion" && review.proposedStatus === "retired"
+            ? COPY_RETIRE_BODY
+            : (review?.draftLabel ?? "")
+        }
         effectiveLabel={review?.effectiveLabel ?? ""}
         dimensions={review?.dimensions ?? []}
         revisionLabel="Expected revision"
         revisionValue={review?.expectedRevision ?? ""}
         busy={reviewBusy}
         error={reviewError}
-        confirmLabel="Confirm effect"
+        confirmLabel={
+          review?.kind === "promotion" && review.proposedStatus === "retired"
+            ? COPY_RETIRE_CONFIRM
+            : "Confirm effect"
+        }
+        cancelLabel={COPY_CANCEL}
         onCancel={() => {
           if (reviewBusy) return;
+          const retiring = review?.kind === "promotion" && review.proposedStatus === "retired";
           setReview(null);
-          props.onStatus("No effect — draft work remains.");
+          props.onStatus(
+            retiring ? "Retirement cancelled. The offer is still active." : "No effect — draft work remains.",
+          );
         }}
         onConfirm={() => void confirmReview()}
       />

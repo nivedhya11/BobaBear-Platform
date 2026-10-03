@@ -48,6 +48,8 @@ import {
   PROMOTION_TARGET_ROLES,
   PROMOTION_TARGET_TYPES,
   PROMOTION_TRIGGER_TYPES,
+  FULFILMENT_MODES,
+  FULFILMENT_TIMINGS,
   type CouponOrigin,
   type CouponStatus,
   type PromotionBenefitConfig,
@@ -59,6 +61,8 @@ import {
   type PromotionTargetRole,
   type PromotionTargetType,
   type PromotionTriggerType,
+  type FulfilmentMode,
+  type FulfilmentTiming,
 } from "../../../shared/promotions";
 import { resolveOperationsWorkforcePrincipal } from "./auth";
 import { readOperationsJsonObjectBody } from "./body";
@@ -215,6 +219,37 @@ function optionalIsoDate(
   return requireIsoDate(body, field);
 }
 
+function optionalBoolean(
+  body: Readonly<Record<string, unknown>>,
+  field: string,
+): boolean | undefined {
+  if (!(field in body)) return undefined;
+  const value = body[field];
+  if (typeof value !== "boolean") {
+    throw new PromotionValidationError(`${field} must be a boolean.`);
+  }
+  return value;
+}
+
+function optionalStringList(
+  body: Readonly<Record<string, unknown>>,
+  field: string,
+  allowed: readonly string[],
+): string[] | null | undefined {
+  if (!(field in body)) return undefined;
+  if (body[field] === null) return null;
+  const value = body[field];
+  if (!Array.isArray(value) || value.length === 0) {
+    throw new PromotionValidationError(`${field} must be null or a non-empty array.`);
+  }
+  return value.map((entry, index) => {
+    if (typeof entry !== "string" || !allowed.includes(entry)) {
+      throw new PromotionValidationError(`${field}[${index}] is invalid.`);
+    }
+    return entry;
+  });
+}
+
 function parseBenefit(body: Readonly<Record<string, unknown>>): PromotionBenefitConfig {
   const benefitType = requireString(body, "benefitType");
   if (!(PROMOTION_BENEFIT_TYPES as readonly string[]).includes(benefitType)) {
@@ -231,6 +266,8 @@ function parseBenefit(body: Readonly<Record<string, unknown>>): PromotionBenefit
     maximumRewardQuantity: optionalNumber(body, "maximumRewardQuantity") ?? null,
     includeModifiers: body.includeModifiers === true,
     includeBundleDeltas: body.includeBundleDeltas === true,
+    complimentaryProductId: optionalString(body, "complimentaryProductId") ?? null,
+    complimentaryVariantId: optionalString(body, "complimentaryVariantId") ?? null,
   };
 }
 
@@ -438,6 +475,19 @@ async function dispatchMutation(
         endsAt: optionalIsoDate(body, "endsAt") ?? null,
         minimumQualifyingAmountPaise: optionalPaise(body, "minimumQualifyingAmountPaise") ?? null,
         minimumItemQuantity: optionalNumber(body, "minimumItemQuantity") ?? null,
+        firstOrderOnly: optionalBoolean(body, "firstOrderOnly"),
+        eligibleFulfilmentModes: optionalStringList(
+          body,
+          "eligibleFulfilmentModes",
+          FULFILMENT_MODES,
+        ) as readonly FulfilmentMode[] | null | undefined,
+        eligibleFulfilmentTimings: optionalStringList(
+          body,
+          "eligibleFulfilmentTimings",
+          FULFILMENT_TIMINGS,
+        ) as readonly FulfilmentTiming[] | null | undefined,
+        maximumRedemptions: optionalNumber(body, "maximumRedemptions") ?? null,
+        maximumRedemptionsPerCustomer: optionalNumber(body, "maximumRedemptionsPerCustomer") ?? null,
       });
       return { promotion: { id: created.id, revision: created.revision.toString(10) } };
     }
@@ -461,6 +511,19 @@ async function dispatchMutation(
         endsAt: optionalIsoDate(body, "endsAt"),
         minimumQualifyingAmountPaise: optionalPaise(body, "minimumQualifyingAmountPaise"),
         minimumItemQuantity: optionalNumber(body, "minimumItemQuantity"),
+        firstOrderOnly: optionalBoolean(body, "firstOrderOnly"),
+        eligibleFulfilmentModes: optionalStringList(
+          body,
+          "eligibleFulfilmentModes",
+          FULFILMENT_MODES,
+        ) as readonly FulfilmentMode[] | null | undefined,
+        eligibleFulfilmentTimings: optionalStringList(
+          body,
+          "eligibleFulfilmentTimings",
+          FULFILMENT_TIMINGS,
+        ) as readonly FulfilmentTiming[] | null | undefined,
+        maximumRedemptions: optionalNumber(body, "maximumRedemptions"),
+        maximumRedemptionsPerCustomer: optionalNumber(body, "maximumRedemptionsPerCustomer"),
       });
       return { revision: result.revision.toString(10) };
     }

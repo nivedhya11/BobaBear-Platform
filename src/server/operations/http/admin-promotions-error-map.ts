@@ -52,6 +52,41 @@ export function mapPromotionsAdminError(error: unknown, requestId: string): Mapp
         body: { ok: false, code: "PROMOTION_STALE_REVISION", requestId, message: error.message },
       };
     }
+    if (error.code === "PROMOTION_COMPLIMENTARY_ACTIVATION_RACE") {
+      return {
+        status: 409,
+        body: {
+          ok: false,
+          code: "PROMOTION_COMPLIMENTARY_ACTIVATION_RACE",
+          requestId,
+          message: error.message,
+        },
+      };
+    }
+    if (error.code === "PROMOTION_COMPLIMENTARY_ACTIVE_CONFLICT") {
+      return {
+        status: 409,
+        body: {
+          ok: false,
+          code: "PROMOTION_COMPLIMENTARY_ACTIVE_CONFLICT",
+          requestId,
+          message: error.message,
+        },
+      };
+    }
+    if (error.code === "PROMOTION_COMPLIMENTARY_INVALID") {
+      return {
+        status: 400,
+        body: {
+          ok: false,
+          code: "PROMOTION_COMPLIMENTARY_INVALID",
+          requestId,
+          message: error.message,
+          field: error.field,
+          issues: [error.message],
+        },
+      };
+    }
     if (error.code === "COUPON_STALE_REVISION") {
       return {
         status: 409,

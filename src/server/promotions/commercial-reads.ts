@@ -1,12 +1,13 @@
 /**
  * Bounded Brand Promotions commercial inspection (IMP-036F F5).
  */
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 
 import {
   promotionAuditEventsTable,
   promotionBenefitsTable,
   promotionCouponsTable,
+  promotionRedemptionClaimsTable,
   promotionsTable,
   promotionTargetsTable,
 } from "../../platform/database/schema/promotions";
@@ -40,6 +41,12 @@ function serializePromotion(row: typeof promotionsTable.$inferSelect) {
     endsAt: row.endsAt ? row.endsAt.toISOString() : null,
     minimumQualifyingAmountPaise: row.minimumQualifyingAmountPaise?.toString(10) ?? null,
     minimumItemQuantity: row.minimumItemQuantity,
+    firstOrderOnly: row.firstOrderOnly,
+    eligibleFulfilmentModes: row.eligibleFulfilmentModes,
+    eligibleFulfilmentTimings: row.eligibleFulfilmentTimings,
+    maximumRedemptions: row.maximumRedemptions,
+    maximumRedemptionsPerCustomer: row.maximumRedemptionsPerCustomer,
+    complimentaryItem: row.complimentaryItem,
     configurationFingerprint: row.configurationFingerprint,
     revision: row.revision.toString(10),
     activatedAt: row.activatedAt ? row.activatedAt.toISOString() : null,
@@ -68,6 +75,30 @@ function serializeCoupon(row: typeof promotionCouponsTable.$inferSelect) {
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
     supportedLifecycleStates: COUPON_STATUSES,
+  };
+}
+
+async function loadRedemptionCounts(
+  context: PersistenceQueryContext,
+  promotionId: string,
+) {
+  const rows = await context.db
+    .select({
+      status: promotionRedemptionClaimsTable.status,
+      count: sql<number>`count(*)::int`,
+    })
+    .from(promotionRedemptionClaimsTable)
+    .where(eq(promotionRedemptionClaimsTable.promotionId, promotionId))
+    .groupBy(promotionRedemptionClaimsTable.status);
+  const byStatus = new Map(rows.map((row) => [row.status, Number(row.count)]));
+  const reservedCount = byStatus.get("RESERVED") ?? 0;
+  const consumedCount = byStatus.get("CONSUMED") ?? 0;
+  const releasedCount = byStatus.get("RELEASED") ?? 0;
+  return {
+    reservedCount,
+    consumedCount,
+    releasedCount,
+    applicationCount: reservedCount + consumedCount,
   };
 }
 
@@ -123,6 +154,8 @@ export async function inspectBrandPromotion(
           maximumRewardQuantity: benefit.maximumRewardQuantity,
           includeModifiers: benefit.includeModifiers,
           includeBundleDeltas: benefit.includeBundleDeltas,
+          complimentaryProductId: benefit.complimentaryProductId,
+          complimentaryVariantId: benefit.complimentaryVariantId,
         }
       : null,
     qualifierTargets: targets
@@ -141,6 +174,7 @@ export async function inspectBrandPromotion(
         variantId: t.variantId,
         chargeDefinitionId: t.chargeDefinitionId,
       })),
+    redemptionCounts: await loadRedemptionCounts(context, row.id),
   };
 }
 

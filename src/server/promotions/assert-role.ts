@@ -48,3 +48,17 @@ export function driverCode(error: unknown): unknown {
 export function isUniqueViolation(error: unknown): boolean {
   return driverCode(error) === "23505";
 }
+
+export function uniqueConstraintName(error: unknown): string | undefined {
+  let current: unknown = error;
+  const seen = new Set<unknown>();
+  while (current && typeof current === "object" && !seen.has(current)) {
+    seen.add(current);
+    const rec = current as { constraint?: unknown; cause?: unknown };
+    if (typeof rec.constraint === "string" && rec.constraint.length > 0) {
+      return rec.constraint;
+    }
+    current = rec.cause;
+  }
+  return undefined;
+}

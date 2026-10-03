@@ -21,6 +21,11 @@ export type FingerprintPromotionInput = Readonly<{
   endsAt: string | null;
   minimumQualifyingAmountPaise: string | null;
   minimumItemQuantity: number | null;
+  firstOrderOnly?: boolean;
+  eligibleFulfilmentModes?: readonly string[] | null;
+  eligibleFulfilmentTimings?: readonly string[] | null;
+  maximumRedemptions?: number | null;
+  maximumRedemptionsPerCustomer?: number | null;
   benefit: PromotionBenefitConfig;
   qualifierTargets: readonly PromotionTargetConfig[];
   benefitTargets: readonly PromotionTargetConfig[];
@@ -54,6 +59,8 @@ function serializeBenefit(b: PromotionBenefitConfig): Record<string, unknown> {
     maximumRewardQuantity: b.maximumRewardQuantity,
     includeModifiers: b.includeModifiers,
     includeBundleDeltas: b.includeBundleDeltas,
+    complimentaryProductId: b.complimentaryProductId ?? null,
+    complimentaryVariantId: b.complimentaryVariantId ?? null,
   };
 }
 
@@ -93,6 +100,11 @@ export function computePromotionConfigurationFingerprint(
     endsAt: input.endsAt,
     minimumQualifyingAmountPaise: input.minimumQualifyingAmountPaise,
     minimumItemQuantity: input.minimumItemQuantity,
+    firstOrderOnly: input.firstOrderOnly === true,
+    eligibleFulfilmentModes: input.eligibleFulfilmentModes ?? null,
+    eligibleFulfilmentTimings: input.eligibleFulfilmentTimings ?? null,
+    maximumRedemptions: input.maximumRedemptions ?? null,
+    maximumRedemptionsPerCustomer: input.maximumRedemptionsPerCustomer ?? null,
     benefit: serializeBenefit(input.benefit),
     qualifierTargets,
     benefitTargets,

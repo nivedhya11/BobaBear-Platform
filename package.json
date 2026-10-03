@@ -232,6 +232,7 @@
     "test:imp036j:tranche2": "node scripts/run-vitest.mjs run --config vitest.database.config.mts tests/database/imp036j-tranche2-measurement-persistence.integration.test.ts",
     "test:imp036j:tranche3": "node scripts/run-vitest.mjs run tests/promotions/imp036j-tranche3-commercial-evaluation.test.ts tests/promotions/engine.test.ts tests/promotions/fatal-and-money.test.ts tests/promotions/tax-integration.test.ts tests/promotions/bogo.test.ts tests/promotions/targets-modifiers.test.ts",
     "test:imp036j:tranche4": "node scripts/run-vitest.mjs run --config vitest.database.config.mts tests/database/imp036j-tranche4-commercial-commands.integration.test.ts",
+    "test:imp036j:tranche6": "node scripts/run-vitest.mjs run tests/administration/PromotionsEditor.test.tsx && node scripts/run-vitest.mjs run --config vitest.database.config.mts tests/database/imp036j-tranche6-workforce-authoring.integration.test.ts",
     "test:checkout": "node scripts/run-vitest.mjs run --config vitest.database.config.mts tests/checkout/",
     "test:checkout-security": "node scripts/run-vitest.mjs run --config vitest.database.config.mts tests/checkout-security",
     "test:checkout-auth-integration": "node scripts/run-vitest.mjs run --config vitest.database.config.mts tests/checkout-auth-integration",

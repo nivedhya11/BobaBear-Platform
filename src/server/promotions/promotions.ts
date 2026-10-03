@@ -2,7 +2,7 @@
  * Promotion draft administration + activation (IMP-016).
  */
 import { randomUUID } from "node:crypto";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 
 import {
   catalogProductsTable,
@@ -25,6 +25,12 @@ import {
   type PromotionBenefitType,
   type PromotionTargetType,
   type PromotionTargetRole,
+  type FulfilmentMode,
+  type FulfilmentTiming,
+  FULFILMENT_MODES,
+  FULFILMENT_TIMINGS,
+  COPY_OP_RACE,
+  COPY_OP_SECOND,
   validateBogoConfiguration,
   assertNoAmbiguousMerchandiseTargets,
   assertBogoTargetRelationship,
@@ -33,6 +39,7 @@ import { requireWorkforcePrincipal } from "../access-control/principal";
 import type { PersistenceQueryContext, PersistenceTransactionContext } from "../persistence/types";
 import { assertTransactionContext, assertUuid, isUniqueViolation } from "./assert-role";
 import { insertPromotionAuditEvent } from "./audit";
+import { assertComplimentaryAuthoringSafe } from "./complimentary-authoring";
 import {
   requirePromotionManageForScope,
   requirePromotionsActivate,
@@ -161,6 +168,37 @@ function validateScopeShape(input: {
   }
 }
 
+function normalizeEligibilityList<T extends string>(
+  values: readonly T[] | null | undefined,
+  allowed: readonly T[],
+  field: string,
+): T[] | null | undefined {
+  if (values === undefined) return undefined;
+  if (values === null) return null;
+  if (values.length === 0) {
+    throw new PromotionValidationError(`${field} must be null or a non-empty subset.`);
+  }
+  const unique = [...new Set(values)];
+  for (const value of unique) {
+    if (!allowed.includes(value)) {
+      throw new PromotionValidationError(`${field} contains an unsupported value.`);
+    }
+  }
+  return unique;
+}
+
+function normalizePositiveCap(
+  value: number | null | undefined,
+  field: string,
+): number | null | undefined {
+  if (value === undefined) return undefined;
+  if (value === null) return null;
+  if (!Number.isSafeInteger(value) || value <= 0) {
+    throw new PromotionValidationError(`${field} must be null or an integer greater than 0.`);
+  }
+  return value;
+}
+
 export async function createPromotionDraft(
   context: PersistenceTransactionContext,
   input: {
@@ -179,6 +217,11 @@ export async function createPromotionDraft(
     endsAt?: Date | null;
     minimumQualifyingAmountPaise?: bigint | null;
     minimumItemQuantity?: number | null;
+    firstOrderOnly?: boolean;
+    eligibleFulfilmentModes?: readonly FulfilmentMode[] | null;
+    eligibleFulfilmentTimings?: readonly FulfilmentTiming[] | null;
+    maximumRedemptions?: number | null;
+    maximumRedemptionsPerCustomer?: number | null;
   },
 ): Promise<{ id: string; revision: bigint }> {
   assertTransactionContext(context, "createPromotionDraft");
@@ -216,6 +259,26 @@ export async function createPromotionDraft(
       endsAt: input.endsAt ?? null,
       minimumQualifyingAmountPaise: input.minimumQualifyingAmountPaise ?? null,
       minimumItemQuantity: input.minimumItemQuantity ?? null,
+      firstOrderOnly: input.firstOrderOnly === true,
+      eligibleFulfilmentModes:
+        normalizeEligibilityList(
+          input.eligibleFulfilmentModes,
+          FULFILMENT_MODES,
+          "eligibleFulfilmentModes",
+        ) ?? null,
+      eligibleFulfilmentTimings:
+        normalizeEligibilityList(
+          input.eligibleFulfilmentTimings,
+          FULFILMENT_TIMINGS,
+          "eligibleFulfilmentTimings",
+        ) ?? null,
+      maximumRedemptions: normalizePositiveCap(input.maximumRedemptions, "maximumRedemptions") ?? null,
+      maximumRedemptionsPerCustomer:
+        normalizePositiveCap(
+          input.maximumRedemptionsPerCustomer,
+          "maximumRedemptionsPerCustomer",
+        ) ?? null,
+      complimentaryItem: false,
       configurationFingerprint: null,
       revision: BigInt(1),
       activatedAt: null,
@@ -261,6 +324,11 @@ export async function updatePromotionDraft(
     endsAt?: Date | null;
     minimumQualifyingAmountPaise?: bigint | null;
     minimumItemQuantity?: number | null;
+    firstOrderOnly?: boolean;
+    eligibleFulfilmentModes?: readonly FulfilmentMode[] | null;
+    eligibleFulfilmentTimings?: readonly FulfilmentTiming[] | null;
+    maximumRedemptions?: number | null;
+    maximumRedemptionsPerCustomer?: number | null;
   },
 ): Promise<{ revision: bigint }> {
   assertTransactionContext(context, "updatePromotionDraft");
@@ -301,6 +369,34 @@ export async function updatePromotionDraft(
         input.minimumItemQuantity !== undefined
           ? input.minimumItemQuantity
           : row.minimumItemQuantity,
+      firstOrderOnly: input.firstOrderOnly !== undefined ? input.firstOrderOnly : row.firstOrderOnly,
+      eligibleFulfilmentModes:
+        input.eligibleFulfilmentModes !== undefined
+          ? (normalizeEligibilityList(
+              input.eligibleFulfilmentModes,
+              FULFILMENT_MODES,
+              "eligibleFulfilmentModes",
+            ) ?? null)
+          : row.eligibleFulfilmentModes,
+      eligibleFulfilmentTimings:
+        input.eligibleFulfilmentTimings !== undefined
+          ? (normalizeEligibilityList(
+              input.eligibleFulfilmentTimings,
+              FULFILMENT_TIMINGS,
+              "eligibleFulfilmentTimings",
+            ) ?? null)
+          : row.eligibleFulfilmentTimings,
+      maximumRedemptions:
+        input.maximumRedemptions !== undefined
+          ? (normalizePositiveCap(input.maximumRedemptions, "maximumRedemptions") ?? null)
+          : row.maximumRedemptions,
+      maximumRedemptionsPerCustomer:
+        input.maximumRedemptionsPerCustomer !== undefined
+          ? (normalizePositiveCap(
+              input.maximumRedemptionsPerCustomer,
+              "maximumRedemptionsPerCustomer",
+            ) ?? null)
+          : row.maximumRedemptionsPerCustomer,
     },
     now,
   );
@@ -378,6 +474,9 @@ export async function setPromotionBenefit(
   if (row.revision !== expected) stalePromotionRevision();
   assertDraft(row);
   const b = input.benefit;
+  let complimentaryProductId: string | null = null;
+  let complimentaryVariantId: string | null = null;
+  let complimentaryItem = false;
   if (b.benefitType === "percentage_discount") {
     if (b.percentageBps === null || b.percentageBps <= 0 || b.percentageBps > 10000) {
       throw new PromotionAdminError("PROMOTION_BENEFIT_INVALID", "Invalid percentage_bps.");
@@ -390,6 +489,31 @@ export async function setPromotionBenefit(
     if (!b.buyQuantity || !b.getQuantity || b.repeatable === null) {
       throw new PromotionAdminError("PROMOTION_BENEFIT_INVALID", "Invalid BOGO fields.");
     }
+  } else if (b.benefitType === "delivery_fee_waiver") {
+    if (
+      b.percentageBps !== null ||
+      b.fixedAmountPaise !== null ||
+      b.buyQuantity !== null ||
+      b.getQuantity !== null ||
+      b.includeModifiers === true ||
+      b.includeBundleDeltas === true
+    ) {
+      throw new PromotionAdminError("PROMOTION_BENEFIT_INVALID", "Invalid delivery_fee_waiver fields.");
+    }
+  } else if (b.benefitType === "complimentary_item") {
+    const bound = await assertComplimentaryAuthoringSafe(context, {
+      brandId: row.brandId,
+      complimentaryProductId: b.complimentaryProductId,
+      complimentaryVariantId: b.complimentaryVariantId,
+    });
+    complimentaryProductId = bound.productId;
+    complimentaryVariantId = bound.variantId;
+    complimentaryItem = true;
+    if (b.includeModifiers === true || b.includeBundleDeltas === true) {
+      throw new PromotionAdminError("PROMOTION_BENEFIT_INVALID", "Invalid complimentary_item fields.");
+    }
+  } else {
+    throw new PromotionAdminError("PROMOTION_BENEFIT_INVALID", "Unsupported benefit type.");
   }
   const now = new Date();
   const existing = await context.db
@@ -399,15 +523,20 @@ export async function setPromotionBenefit(
     .limit(1);
   const values = {
     benefitType: b.benefitType,
-    percentageBps: b.percentageBps,
-    fixedAmountPaise: b.fixedAmountPaise,
-    maximumDiscountPaise: b.maximumDiscountPaise,
-    buyQuantity: b.buyQuantity,
-    getQuantity: b.getQuantity,
-    repeatable: b.repeatable,
-    maximumRewardQuantity: b.maximumRewardQuantity,
-    includeModifiers: b.includeModifiers,
-    includeBundleDeltas: b.includeBundleDeltas,
+    percentageBps: b.benefitType === "percentage_discount" ? b.percentageBps : null,
+    fixedAmountPaise: b.benefitType === "fixed_amount_discount" ? b.fixedAmountPaise : null,
+    maximumDiscountPaise: b.benefitType === "percentage_discount" || b.benefitType === "fixed_amount_discount"
+      ? b.maximumDiscountPaise
+      : null,
+    buyQuantity: b.benefitType === "buy_x_get_y" ? b.buyQuantity : null,
+    getQuantity: b.benefitType === "buy_x_get_y" ? b.getQuantity : null,
+    repeatable: b.benefitType === "buy_x_get_y" ? b.repeatable : null,
+    maximumRewardQuantity: b.benefitType === "buy_x_get_y" ? b.maximumRewardQuantity : null,
+    includeModifiers: complimentaryItem || b.benefitType === "delivery_fee_waiver" ? false : b.includeModifiers,
+    includeBundleDeltas:
+      complimentaryItem || b.benefitType === "delivery_fee_waiver" ? false : b.includeBundleDeltas,
+    complimentaryProductId,
+    complimentaryVariantId,
     updatedAt: now,
   };
   if (existing[0]) {
@@ -423,7 +552,13 @@ export async function setPromotionBenefit(
       createdAt: now,
     });
   }
-  const revision = await advancePromotionRevision(context, row, expected, {}, now);
+  const revision = await advancePromotionRevision(
+    context,
+    row,
+    expected,
+    { complimentaryItem },
+    now,
+  );
   const principal = requireWorkforcePrincipal(input.actor);
   await insertPromotionAuditEvent(context, {
     actorWorkforceUserId: principal.workforceUserId,
@@ -549,11 +684,24 @@ export async function activatePromotion(
     brandId?: string;
     promotionId: string;
     expectedPromotionRevision: bigint | number | string;
+    /**
+     * After authoring locks are held and before the status update.
+     * Tests use this to overlap two complimentary activations. Production omits it.
+     */
+    afterAuthoringLocksHeld?: () => Promise<void>;
   },
 ): Promise<{ revision: bigint }> {
   assertTransactionContext(context, "activatePromotion");
   const expected = parseExpectedPromotionRevision(input.expectedPromotionRevision);
-  const row = await lockPromotionAfterBrand(context, input.promotionId);
+  const promotionId = assertUuid(input.promotionId, "promotionId");
+  const peek = await context.db
+    .select({ complimentaryItem: promotionsTable.complimentaryItem })
+    .from(promotionsTable)
+    .where(eq(promotionsTable.id, promotionId))
+    .limit(1);
+  const row = peek[0]?.complimentaryItem
+    ? await lockPromotionRow(context, promotionId)
+    : await lockPromotionAfterBrand(context, promotionId);
   assertPathBrandMatchesPromotion(row, input.brandId);
   await requirePromotionsActivate(context, input.actor, row.brandId);
   // Still require manage scope for lower-scope governance visibility
@@ -581,6 +729,36 @@ export async function activatePromotion(
   const benefitRow = benefits[0];
   if (!benefitRow) {
     throw new PromotionAdminError("PROMOTION_BENEFIT_INVALID", "Benefit required before activation.");
+  }
+  const isComplimentaryBenefit = benefitRow.benefitType === "complimentary_item";
+  if (row.complimentaryItem !== isComplimentaryBenefit) {
+    throw new PromotionAdminError(
+      "PROMOTION_BENEFIT_INVALID",
+      "Complimentary flag must match the benefit type before activation.",
+    );
+  }
+  if (isComplimentaryBenefit) {
+    await assertComplimentaryAuthoringSafe(context, {
+      brandId: row.brandId,
+      complimentaryProductId: benefitRow.complimentaryProductId,
+      complimentaryVariantId: benefitRow.complimentaryVariantId,
+    });
+    const activeComplimentary = await context.db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(promotionsTable)
+      .where(
+        and(
+          eq(promotionsTable.brandId, row.brandId),
+          eq(promotionsTable.status, "active"),
+          eq(promotionsTable.complimentaryItem, true),
+        ),
+      );
+    if ((activeComplimentary[0]?.count ?? 0) >= 1) {
+      throw new PromotionAdminError(
+        "PROMOTION_COMPLIMENTARY_ACTIVE_CONFLICT",
+        COPY_OP_SECOND,
+      );
+    }
   }
   const targets = await context.db
     .select()
@@ -625,6 +803,8 @@ export async function activatePromotion(
     maximumRewardQuantity: benefitRow.maximumRewardQuantity,
     includeModifiers: benefitRow.includeModifiers,
     includeBundleDeltas: benefitRow.includeBundleDeltas,
+    complimentaryProductId: benefitRow.complimentaryProductId ?? null,
+    complimentaryVariantId: benefitRow.complimentaryVariantId ?? null,
   };
 
   if (benefit.benefitType === "buy_x_get_y") {
@@ -673,25 +853,42 @@ export async function activatePromotion(
         ? null
         : row.minimumQualifyingAmountPaise.toString(),
     minimumItemQuantity: row.minimumItemQuantity,
+    firstOrderOnly: row.firstOrderOnly,
+    eligibleFulfilmentModes: row.eligibleFulfilmentModes,
+    eligibleFulfilmentTimings: row.eligibleFulfilmentTimings,
+    maximumRedemptions: row.maximumRedemptions,
+    maximumRedemptionsPerCustomer: row.maximumRedemptionsPerCustomer,
     benefit,
     qualifierTargets: qConfigs,
     benefitTargets: bConfigs,
   });
 
+  if (input.afterAuthoringLocksHeld) {
+    await input.afterAuthoringLocksHeld();
+  }
+
   const principal = requireWorkforcePrincipal(input.actor);
   const now = new Date();
-  const revision = await advancePromotionRevision(
-    context,
-    row,
-    expected,
-    {
-      status: "active",
-      activatedAt: now,
-      activatedByWorkforceUserId: principal.workforceUserId,
-      configurationFingerprint: fingerprint,
-    },
-    now,
-  );
+  let revision: bigint;
+  try {
+    revision = await advancePromotionRevision(
+      context,
+      row,
+      expected,
+      {
+        status: "active",
+        activatedAt: now,
+        activatedByWorkforceUserId: principal.workforceUserId,
+        configurationFingerprint: fingerprint,
+      },
+      now,
+    );
+  } catch (error) {
+    if (isComplimentaryBenefit && isUniqueViolation(error)) {
+      throw new PromotionAdminError("PROMOTION_COMPLIMENTARY_ACTIVATION_RACE", COPY_OP_RACE);
+    }
+    throw error;
+  }
 
   await insertPromotionAuditEvent(context, {
     actorWorkforceUserId: principal.workforceUserId,

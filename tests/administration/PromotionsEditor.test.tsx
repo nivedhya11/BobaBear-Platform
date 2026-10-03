@@ -7,11 +7,21 @@ import type {
   CommercialCapabilities,
   CommercialContext,
 } from "../../src/components/administration/commercial/commercial-types";
+import {
+  COPY_CANCEL,
+  COPY_OP_GIFT,
+  COPY_OP_RETIRED,
+  COPY_RETIRE_CONFIRM,
+  COPY_RETIRE_TITLE,
+} from "../../src/shared/promotions/operator-copy";
 
 const listPromotions = vi.fn();
 const listCoupons = vi.fn();
 const getPromotion = vi.fn();
 const setPromotionTargets = vi.fn();
+const previewPromotionConsequence = vi.fn();
+const retirePromotion = vi.fn();
+const activatePromotion = vi.fn();
 
 vi.mock("@/lib/administration/commercial-promotions", () => ({
   listPromotions: (...args: unknown[]) => listPromotions(...args),
@@ -22,10 +32,10 @@ vi.mock("@/lib/administration/commercial-promotions", () => ({
   savePromotionDraft: vi.fn(),
   savePromotionBenefit: vi.fn(),
   setPromotionTargets: (...args: unknown[]) => setPromotionTargets(...args),
-  previewPromotionConsequence: vi.fn(),
+  previewPromotionConsequence: (...args: unknown[]) => previewPromotionConsequence(...args),
   previewCouponConsequence: vi.fn(),
-  activatePromotion: vi.fn(),
-  retirePromotion: vi.fn(),
+  activatePromotion: (...args: unknown[]) => activatePromotion(...args),
+  retirePromotion: (...args: unknown[]) => retirePromotion(...args),
   activateCoupon: vi.fn(),
   disableCoupon: vi.fn(),
   enableCoupon: vi.fn(),
@@ -84,6 +94,12 @@ function draftPromotion(overrides: Partial<{
     endsAt: null,
     minimumQualifyingAmountPaise: null,
     minimumItemQuantity: null,
+    firstOrderOnly: false,
+    eligibleFulfilmentModes: null,
+    eligibleFulfilmentTimings: null,
+    maximumRedemptions: null,
+    maximumRedemptionsPerCustomer: null,
+    complimentaryItem: false,
     revision: overrides.revision ?? "1",
     supportedLifecycleStates: ["draft", "active", "retired"] as const,
   };
@@ -104,6 +120,12 @@ function mockPromotionDetail(promotion: ReturnType<typeof draftPromotion>) {
       benefit: null,
       qualifierTargets: [],
       benefitTargets: [],
+      redemptionCounts: {
+        reservedCount: 0,
+        consumedCount: 0,
+        releasedCount: 0,
+        applicationCount: 0,
+      },
     },
   });
 }
@@ -114,6 +136,9 @@ beforeEach(() => {
   getPromotion.mockReset();
   setPromotionTargets.mockReset();
   setPromotionTargets.mockResolvedValue({ ok: true, status: 200, data: {} });
+  previewPromotionConsequence.mockReset();
+  retirePromotion.mockReset();
+  activatePromotion.mockReset();
   mockPromotionDetail(draftPromotion());
 });
 
@@ -289,5 +314,77 @@ describe("PromotionsEditor", () => {
     expect(screen.queryByRole("button", { name: /Review & activate/i })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Review & retire/i })).toBeInTheDocument();
     expect(screen.queryByLabelText("Benefit type")).not.toBeInTheDocument();
+  });
+
+  it("exposes V1 eligibility, limits, complimentary ids, redemption counts, and no gift catalogue", async () => {
+    const user = userEvent.setup();
+    mockPromotionDetail(draftPromotion());
+    render(
+      <PromotionsEditor
+        context={baseContext}
+        capabilities={capabilities}
+        authoringAllowed
+        onStatus={vi.fn()}
+      />,
+    );
+    await waitFor(() => expect(screen.getByText(/Welcome \(WELCOME\)/)).toBeInTheDocument());
+    await user.click(screen.getByRole("button", { name: /Welcome \(WELCOME\)/ }));
+    await waitFor(() => expect(screen.getByText("First order only")).toBeInTheDocument());
+    expect(screen.getByText("Fulfilment mode")).toBeInTheDocument();
+    expect(screen.getByLabelText("Maximum redemptions")).toBeInTheDocument();
+    expect(screen.getByLabelText("Maximum redemptions per customer")).toBeInTheDocument();
+    expect(screen.getByLabelText("Benefit type")).toBeInTheDocument();
+    await user.selectOptions(screen.getByLabelText("Benefit type"), "complimentary_item");
+    expect(screen.getByText(COPY_OP_GIFT)).toBeInTheDocument();
+    expect(screen.getByLabelText("Complimentary product id")).toBeInTheDocument();
+    expect(screen.getByLabelText("Complimentary variant id")).toBeInTheDocument();
+    expect(screen.getByTestId("redemption-counts")).toHaveTextContent("Applications: 0");
+    expect(screen.queryByText(/gift catalogue/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/customerId/i)).not.toBeInTheDocument();
+  });
+
+  it("retire confirm is keyboard operable; cancel leaves ACTIVE and confirm retires", async () => {
+    const user = userEvent.setup();
+    mockPromotionDetail(draftPromotion({ status: "active", revision: "4" }));
+    previewPromotionConsequence.mockResolvedValue({
+      ok: true,
+      status: 200,
+      data: {
+        preview: {
+          expectedPromotionRevision: "4",
+          proposedStatus: "retired",
+          currentStatus: "active",
+          customerVisibleImplication: "lifecycle",
+          supportedLifecycleStates: ["draft", "active", "retired"],
+        },
+      },
+    });
+    retirePromotion.mockResolvedValue({ ok: true, status: 200, data: { revision: "5" } });
+    const onStatus = vi.fn();
+    render(
+      <PromotionsEditor
+        context={baseContext}
+        capabilities={capabilities}
+        authoringAllowed
+        onStatus={onStatus}
+      />,
+    );
+    await waitFor(() => expect(screen.getByText(/Welcome \(WELCOME\)/)).toBeInTheDocument());
+    await user.click(screen.getByRole("button", { name: /Welcome \(WELCOME\)/ }));
+    await waitFor(() => expect(screen.getByRole("button", { name: /Review & retire/i })).toBeInTheDocument());
+    await user.click(screen.getByRole("button", { name: /Review & retire/i }));
+    expect(await screen.findByText(COPY_RETIRE_TITLE)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: COPY_CANCEL })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: COPY_RETIRE_CONFIRM })).toBeInTheDocument();
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(screen.queryByText(COPY_RETIRE_TITLE)).not.toBeInTheDocument());
+    expect(retirePromotion).not.toHaveBeenCalled();
+    expect(onStatus).toHaveBeenCalledWith("Retirement cancelled. The offer is still active.");
+
+    await user.click(screen.getByRole("button", { name: /Review & retire/i }));
+    expect(await screen.findByText(COPY_RETIRE_TITLE)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: COPY_RETIRE_CONFIRM }));
+    await waitFor(() => expect(retirePromotion).toHaveBeenCalled());
+    expect(onStatus).toHaveBeenCalledWith(COPY_OP_RETIRED);
   });
 });

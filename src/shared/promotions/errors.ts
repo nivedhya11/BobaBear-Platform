@@ -26,18 +26,34 @@ export class PromotionFatalError extends Error {
 
 export class PromotionAdminError extends Error {
   readonly code: PromotionAdminErrorCode;
+  readonly field?: string;
 
-  constructor(code: PromotionAdminErrorCode, message: string) {
+  constructor(
+    code: PromotionAdminErrorCode,
+    message: string,
+    options?: Readonly<{ field?: string }>,
+  ) {
     super(message);
     this.name = "PromotionAdminError";
     this.code = code;
+    if (options?.field) this.field = options.field;
     if (typeof Error.captureStackTrace === "function") {
       Error.captureStackTrace(this, new.target);
     }
   }
 
-  toSafeJSON(): { name: string; message: string; code: PromotionAdminErrorCode } {
-    return { name: this.name, message: this.message, code: this.code };
+  toSafeJSON(): {
+    name: string;
+    message: string;
+    code: PromotionAdminErrorCode;
+    field?: string;
+  } {
+    return {
+      name: this.name,
+      message: this.message,
+      code: this.code,
+      ...(this.field ? { field: this.field } : {}),
+    };
   }
 }
 

@@ -22,7 +22,8 @@ export type ConsequenceReviewDialogProps = Readonly<{
   noOpHint?: string;
   busy?: boolean;
   error?: string | null;
-  confirmLabel?: "Publish changes" | "Confirm effect";
+  confirmLabel?: string;
+  cancelLabel?: string;
   onCancel: () => void;
   onConfirm: () => void;
 }>;
@@ -33,6 +34,7 @@ export function ConsequenceReviewDialog(props: ConsequenceReviewDialogProps) {
   const restoreFocusRef = useRef<HTMLElement | null>(null);
   const busyRef = useRef(props.busy === true);
   const confirmLabel = props.confirmLabel ?? "Confirm effect";
+  const cancelLabel = props.cancelLabel ?? "Cancel";
 
   useEffect(() => {
     busyRef.current = props.busy === true;
@@ -178,7 +180,7 @@ export function ConsequenceReviewDialog(props: ConsequenceReviewDialogProps) {
             className={cn(enterpriseFocusRingClass)}
             onClick={props.onCancel}
           >
-            Cancel
+            {cancelLabel}
           </Button>
           <Button
             type="button"

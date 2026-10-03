@@ -24,6 +24,12 @@ export type Promotion = Readonly<{
   endsAt: string | null;
   minimumQualifyingAmountPaise: string | null;
   minimumItemQuantity: number | null;
+  firstOrderOnly: boolean;
+  eligibleFulfilmentModes: readonly string[] | null;
+  eligibleFulfilmentTimings: readonly string[] | null;
+  maximumRedemptions: number | null;
+  maximumRedemptionsPerCustomer: number | null;
+  complimentaryItem: boolean;
   revision: string;
   supportedLifecycleStates: readonly ["draft", "active", "retired"];
 }>;
@@ -67,6 +73,12 @@ export function getPromotion(brandId: string, promotionId: string) {
     benefit: unknown;
     qualifierTargets: readonly PromotionTarget[];
     benefitTargets: readonly PromotionTarget[];
+    redemptionCounts: Readonly<{
+      reservedCount: number;
+      consumedCount: number;
+      releasedCount: number;
+      applicationCount: number;
+    }>;
   }>(`${brandPromotions(brandId)}/${promotionId}`);
 }
 
@@ -86,6 +98,11 @@ export function createPromotion(
     endsAt?: string | null;
     minimumQualifyingAmountPaise?: string | null;
     minimumItemQuantity?: number;
+    firstOrderOnly?: boolean;
+    eligibleFulfilmentModes?: readonly string[] | null;
+    eligibleFulfilmentTimings?: readonly string[] | null;
+    maximumRedemptions?: number | null;
+    maximumRedemptionsPerCustomer?: number | null;
   }>,
 ) {
   return adminRequest<{ ok: true; promotion: Readonly<{ id: string; revision: string }> }>(
@@ -106,6 +123,11 @@ export function savePromotionDraft(
     endsAt?: string | null;
     minimumQualifyingAmountPaise?: string | null;
     minimumItemQuantity?: number;
+    firstOrderOnly?: boolean;
+    eligibleFulfilmentModes?: readonly string[] | null;
+    eligibleFulfilmentTimings?: readonly string[] | null;
+    maximumRedemptions?: number | null;
+    maximumRedemptionsPerCustomer?: number | null;
   }>,
 ) {
   return adminRequest<{ ok: true; revision: string }>(
@@ -119,7 +141,12 @@ export function savePromotionBenefit(
   promotionId: string,
   body: Readonly<{
     expectedPromotionRevision: string;
-    benefitType: "percentage_discount" | "fixed_amount_discount" | "buy_x_get_y";
+    benefitType:
+      | "percentage_discount"
+      | "fixed_amount_discount"
+      | "buy_x_get_y"
+      | "delivery_fee_waiver"
+      | "complimentary_item";
     percentageBps?: number;
     fixedAmountPaise?: string;
     maximumDiscountPaise?: string;
@@ -129,6 +156,8 @@ export function savePromotionBenefit(
     maximumRewardQuantity?: number;
     includeModifiers?: boolean;
     includeBundleDeltas?: boolean;
+    complimentaryProductId?: string | null;
+    complimentaryVariantId?: string | null;
   }>,
 ) {
   return adminRequest<{ ok: true; revision: string }>(

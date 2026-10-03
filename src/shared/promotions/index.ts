@@ -16,3 +16,4 @@ export * from "./benefit";
 export * from "./allocate";
 export * from "./select";
 export * from "./evaluate";
+export * from "./operator-copy";
