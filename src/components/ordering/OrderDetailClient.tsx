@@ -103,9 +103,20 @@ export function OrderDetailClient() {
                 <li key={`${line.productName}-${index}`} className="font-body text-[14px]">
                   {line.quantity} × {line.productName}
                   {line.variantName ? ` (${line.variantName})` : ""} — {formatPaise(line.lineTotalMinor)}
+                  {line.lineOrigin === "complimentary_offer" ? (
+                    <span className="mt-1 block text-[12px] text-[var(--text-secondary)]">
+                      Included with your offer
+                    </span>
+                  ) : null}
                 </li>
               ))}
             </ul>
+
+            {BigInt(order.moneySummary?.promotionDiscountMinor || "0") > BigInt(0) ? (
+              <p data-testid="copy-purchased" className="font-body text-[14px] text-[var(--text-secondary)]">
+                You saved {formatPaise(order.moneySummary?.promotionDiscountMinor ?? "0")} on this order.
+              </p>
+            ) : null}
 
             <OrderMoneySummaryPanel moneySummary={order.moneySummary} title="Payment summary" />
 

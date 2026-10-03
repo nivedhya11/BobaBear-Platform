@@ -105,6 +105,7 @@ function linesFromSnapshot(
         variantName: line.variantName,
         quantity: line.quantity,
         lineTotalMinor: serializeMoneyMinor(line.lineTotalPaise),
+        lineOrigin: line.lineOrigin,
         modifiers: Object.freeze(
           line.modifiers.map((m) =>
             Object.freeze({

@@ -7,6 +7,7 @@ export type CheckoutSnapshotLineRow = Readonly<{
   variantName: string;
   quantity: number;
   lineTotalPaise: string;
+  lineOrigin?: "cart" | "complimentary_offer";
 }>;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -35,6 +36,8 @@ export function narrowCheckoutSnapshotLines(
         variantName,
         quantity,
         lineTotalPaise,
+        lineOrigin:
+          raw.lineOrigin === "complimentary_offer" ? "complimentary_offer" : "cart",
       }),
     );
   }

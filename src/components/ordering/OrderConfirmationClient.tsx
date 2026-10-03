@@ -8,6 +8,7 @@ import { CustomerOrderFulfilmentPanel } from "@/components/ordering/CustomerOrde
 import { OrderMoneySummaryPanel } from "@/components/ordering/OrderMoneySummaryPanel";
 import { OrderSupportAction } from "@/components/ordering/OrderSupportAction";
 import { commerceErrorCopy } from "@/components/ordering/error-copy";
+import { formatPaise } from "@/components/ordering/format-money";
 import { orderStatusLabel } from "@/components/ordering/order-status";
 import { fetchCustomerSession } from "@/lib/customer-auth/client";
 import { loginUrlWithReturn } from "@/lib/customer-auth/return-to";
@@ -88,9 +89,19 @@ export function OrderConfirmationClient() {
                 <li key={`${line.productName}-${index}`} className="font-body text-[14px]">
                   {line.quantity} × {line.productName}
                   {line.variantName ? ` (${line.variantName})` : ""}
+                  {line.lineOrigin === "complimentary_offer" ? (
+                    <span className="mt-1 block text-[12px] text-[var(--text-secondary)]">
+                      Included with your offer
+                    </span>
+                  ) : null}
                 </li>
               ))}
             </ul>
+            {BigInt(order.moneySummary?.promotionDiscountMinor || "0") > BigInt(0) ? (
+              <p data-testid="copy-purchased" className="font-body text-[14px] text-[var(--text-secondary)]">
+                You saved {formatPaise(order.moneySummary?.promotionDiscountMinor ?? "0")} on this order.
+              </p>
+            ) : null}
             <OrderMoneySummaryPanel moneySummary={order.moneySummary} title="Payment summary" />
             <CustomerOrderFulfilmentPanel order={order} showDeliveryTracking={false} />
             <OrderSupportAction orderNumber={order.orderNumber} />

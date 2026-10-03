@@ -169,6 +169,59 @@ export async function clearCart(input: {
   return rememberFromCartResult(input.brandId, result);
 }
 
+export async function applyCartCoupon(input: {
+  brandId: string;
+  couponCode: string;
+  expectedRevision: string;
+  sourceCommandId: string;
+  reviewSurfaceToken?: string | null;
+}): Promise<CommerceHttpResult<{ cart: CommerceCart }>> {
+  const body: Record<string, unknown> = {
+    brandId: input.brandId,
+    couponCode: input.couponCode,
+    expectedRevision: input.expectedRevision,
+    sourceCommandId: input.sourceCommandId,
+  };
+  if (input.reviewSurfaceToken) body.reviewSurfaceToken = input.reviewSurfaceToken;
+  const result = await commerceRequest<CartEnvelope>("/api/v1/cart/coupon", {
+    method: "POST",
+    body,
+    guestToken: true,
+  });
+  return rememberFromCartResult(input.brandId, result);
+}
+
+export async function removeCartCoupon(input: {
+  brandId: string;
+  expectedRevision: string;
+  sourceCommandId: string;
+  reviewSurfaceToken?: string | null;
+}): Promise<CommerceHttpResult<{ cart: CommerceCart }>> {
+  const body: Record<string, unknown> = {
+    brandId: input.brandId,
+    expectedRevision: input.expectedRevision,
+    sourceCommandId: input.sourceCommandId,
+  };
+  if (input.reviewSurfaceToken) body.reviewSurfaceToken = input.reviewSurfaceToken;
+  const result = await commerceRequest<CartEnvelope>("/api/v1/cart/coupon/remove", {
+    method: "POST",
+    body,
+    guestToken: true,
+  });
+  return rememberFromCartResult(input.brandId, result);
+}
+
+export async function recordCartCheckoutActivation(input: {
+  brandId: string;
+  activationId: string;
+}): Promise<CommerceHttpResult<{ ok: true }>> {
+  return commerceRequest("/api/v1/cart/checkout-activations", {
+    method: "POST",
+    body: { brandId: input.brandId, activationId: input.activationId },
+    guestToken: true,
+  });
+}
+
 export async function evaluateCart(input: {
   brandId: string;
   location?: Readonly<{

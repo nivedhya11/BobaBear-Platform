@@ -225,6 +225,8 @@ export type CheckoutEvaluationSuccess = Readonly<{
   snapshot: CheckoutSnapshot;
   evaluationId?: string;
   reviewSurfaceToken?: string;
+  /** Server commercial explanation for presentation. Not payable authority. */
+  quote?: Readonly<{ commercialExplanation: unknown }>;
 }>;
 
 export type SavedAddressDestinationInput = Readonly<{

@@ -89,6 +89,7 @@ export type OrderLineProjection = Readonly<{
   variantName: string;
   quantity: number;
   lineTotalMinor: string;
+  lineOrigin?: "cart" | "complimentary_offer";
   modifiers: readonly Readonly<{
     groupName: string;
     optionName: string;

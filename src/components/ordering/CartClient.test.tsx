@@ -561,7 +561,9 @@ describe("CartClient", () => {
     await waitFor(() => expect(screen.getByText("Classic Milk Tea")).toBeInTheDocument());
     expect(screen.getByTestId("cart-item-count")).toHaveTextContent("2 items");
     expect(screen.getByText("2")).toBeInTheDocument();
-    expect(screen.getAllByText(/Estimated subtotal ₹398\.00/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/^Estimated subtotal$/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByText("₹398.00").length).toBeGreaterThan(0);
+    expect(screen.queryByText(/Total payable/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/2 items · Estimated subtotal/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/menu prices/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/Cart total \(menu prices\)/i)).not.toBeInTheDocument();
@@ -578,7 +580,7 @@ describe("CartClient", () => {
     expect(screen.getByText("Your cart is empty. Browse the menu to add something.")).toBeInTheDocument();
   });
 
-  it("shows Total shown at checkout when base menu item is missing", async () => {
+  it("shows Estimated subtotal when base menu item is missing", async () => {
     getActiveCart.mockResolvedValue({
       ok: true,
       status: 200,
@@ -589,10 +591,13 @@ describe("CartClient", () => {
     render(<CartClient brandId={brandId} />);
     await waitFor(() =>
       expect(
-        within(screen.getByTestId("cart-order-summary")).getByText("Total shown at checkout"),
+        within(screen.getByTestId("cart-order-summary")).getByText(/Estimated subtotal/i),
       ).toBeInTheDocument(),
     );
-    expect(screen.queryByText(/Estimated subtotal/i)).not.toBeInTheDocument();
+    expect(
+      within(screen.getByTestId("cart-order-summary")).queryByText(/Total payable/i),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText("Total shown at checkout")).not.toBeInTheDocument();
   });
 
   it("renders configured modifier group and option with quantity and price delta", async () => {

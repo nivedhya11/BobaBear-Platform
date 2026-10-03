@@ -383,6 +383,9 @@ export async function evaluateCheckout(
       snapshot: preload.checkout.activeSnapshot,
       evaluationId: measured.evaluationId,
       reviewSurfaceToken: measured.reviewSurfaceToken,
+      quote: Object.freeze({
+        commercialExplanation: commercial.quote.commercialExplanation ?? null,
+      }),
     });
   }
 
@@ -581,6 +584,9 @@ export async function evaluateCheckout(
     snapshot: committed.aggregate.activeSnapshot,
     evaluationId: committed.evaluationId,
     reviewSurfaceToken: committed.reviewSurfaceToken,
+    quote: Object.freeze({
+      commercialExplanation: commercial.quote.commercialExplanation ?? null,
+    }),
   });
 }
 

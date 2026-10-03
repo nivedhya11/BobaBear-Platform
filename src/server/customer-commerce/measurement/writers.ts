@@ -147,7 +147,7 @@ export function deriveExplanationReasonClass(input: {
   return input.coarseShape;
 }
 
-function derivePresentationClass(input: {
+export function derivePresentationClass(input: {
   coarseShape: CoarseShape;
   staleRecovery: boolean;
   reasonClass: string;
@@ -593,7 +593,7 @@ async function lockJourneyHead(
   return { nextSequence: head.nextSequence, closedAt: head.closedAt };
 }
 
-async function allocateJourneyFact(input: {
+export async function allocateJourneyFact(input: {
   context: PersistenceTransactionContext;
   journeyKey: string;
   factKind:
@@ -1135,6 +1135,50 @@ export async function copyJourneyKeyOntoUnresolvedOrigins(input: {
           ),
         );
     }
+  }
+}
+
+export async function recordCartCheckoutActivation(input: {
+  context: PersistenceTransactionContext;
+  activationId: string;
+  cartId: string;
+}): Promise<void> {
+  const existing = await input.context.db
+    .select({
+      activationId: cartCheckoutActivationsTable.activationId,
+      cartId: cartCheckoutActivationsTable.cartId,
+    })
+    .from(cartCheckoutActivationsTable)
+    .where(eq(cartCheckoutActivationsTable.activationId, input.activationId))
+    .limit(1);
+  if (existing[0]) {
+    if (existing[0].cartId !== input.cartId) {
+      throw new CartError(
+        "CART_CONFLICT",
+        "Activation cannot be recorded against a different Cart.",
+        { field: "activationId" },
+      );
+    }
+    return;
+  }
+  try {
+    await input.context.db.insert(cartCheckoutActivationsTable).values({
+      activationId: input.activationId,
+      cartId: input.cartId,
+      occurredAt: sql`clock_timestamp()` as unknown as Date,
+    });
+  } catch {
+    const replay = await input.context.db
+      .select({ cartId: cartCheckoutActivationsTable.cartId })
+      .from(cartCheckoutActivationsTable)
+      .where(eq(cartCheckoutActivationsTable.activationId, input.activationId))
+      .limit(1);
+    if (replay[0]?.cartId === input.cartId) return;
+    throw new CartError(
+      "CART_CONFLICT",
+      "Activation cannot be recorded against a different Cart.",
+      { field: "activationId" },
+    );
   }
 }
 

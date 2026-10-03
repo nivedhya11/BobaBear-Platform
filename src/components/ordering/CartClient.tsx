@@ -4,15 +4,22 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/Button";
 import { CartLineList } from "@/components/ordering/CartLineList";
-import { CartSummary } from "@/components/ordering/CartSummary";
+import { CouponField } from "@/components/ordering/CouponField";
+import { CommercialOfferStack } from "@/components/ordering/CommercialOfferStack";
+import { postCommittedPresentationObservation } from "@/components/ordering/committed-presentation-observation";
+import {
+  canReuseCheckoutEvaluation,
+  merchandiseSubtotalFromQuote,
+  parseCommercialExplanation,
+} from "@/components/ordering/commercial-explanation-presentation";
+import { formatPaise } from "@/components/ordering/format-money";
+import { IMP036J_COPY } from "@/components/ordering/imp036j-copy";
 import {
   buildCartLinePresentations,
   buildCustomerMenuLookups,
   cartBundleSelectionsToInput,
   cartModifiersToInput,
   cartUnitCount,
-  formatCartEstimatePrimaryLabel,
-  formatPresentationEstimateLabel,
   resolveCartPresentationEstimate,
 } from "@/components/ordering/cart-presentation";
 import { publishCartCount } from "@/components/ordering/cart-count-sync";
@@ -29,16 +36,21 @@ import {
   isCartCheckoutBlocked,
 } from "@/components/ordering/serviceability-copy";
 import {
+  applyCartCoupon,
   clearCart,
   evaluateCart,
   getActiveCart,
+  getActiveCheckout,
   getCustomerMenu,
+  recordCartCheckoutActivation,
+  removeCartCoupon,
   removeCartLine,
   setCartLineQuantity,
   updateCartLineConfiguration,
   type CommerceCart,
   type CommerceCartEvaluation,
   type CommerceCartLine,
+  type CommerceCheckout,
 } from "@/lib/customer-commerce";
 import {
   menuOutletIdFromOrderingContext,
@@ -65,6 +77,11 @@ export function CartClient(props: { brandId: string }) {
   const [error, setError] = useState<string | null>(null);
   const [editTarget, setEditTarget] = useState<EditTarget | null>(null);
   const [dialogError, setDialogError] = useState<string | null>(null);
+  const [couponDraft, setCouponDraft] = useState("");
+  const [couponPending, setCouponPending] = useState(false);
+  const [couponRetry, setCouponRetry] = useState(false);
+  const [activeCheckout, setActiveCheckout] = useState<CommerceCheckout | null>(null);
+  const priceSummaryRef = useRef<HTMLDivElement | null>(null);
   /** One delivery-context surface generation for outlet/menu → cart eval. */
   const surfaceGenerationRef = useRef(0);
   /** Latest cart-evaluation epoch within (and across) a delivery generation. */
@@ -84,10 +101,6 @@ export function CartClient(props: { brandId: string }) {
       ),
     [cart, menuLookups, brandId],
   );
-
-  useEffect(() => {
-    cartRef.current = cart;
-  }, [cart]);
 
   const publishEvaluationIfCurrent = useCallback(
     async (generation: number, context: DeliveryContext, currentCart: CommerceCart | null) => {
@@ -159,8 +172,15 @@ export function CartClient(props: { brandId: string }) {
     }
     setCart(cartResult.data.cart);
     cartRef.current = cartResult.data.cart;
+    if (cartResult.data.cart?.manualCouponCode) {
+      setCouponDraft(cartResult.data.cart.manualCouponCode);
+    }
     return cartResult.data.cart;
   }, [brandId]);
+
+  useEffect(() => {
+    cartRef.current = cart;
+  }, [cart]);
 
   useEffect(() => {
     let cancelled = false;
@@ -210,6 +230,7 @@ export function CartClient(props: { brandId: string }) {
   async function applyCartMutation(nextCart: CommerceCart): Promise<void> {
     setCart(nextCart);
     cartRef.current = nextCart;
+    if (nextCart.manualCouponCode) setCouponDraft(nextCart.manualCouponCode);
     publishCartCount(cartUnitCount(nextCart));
     // Evaluate against live delivery authority, not a stale render/async closure.
     const generation = surfaceGenerationRef.current;
@@ -275,15 +296,59 @@ export function CartClient(props: { brandId: string }) {
 
   const checkoutBlocked = isCartCheckoutBlocked(evaluation);
 
+  async function mutateCoupon(
+    work: () => Promise<{ ok: true; data: { cart: CommerceCart } } | { ok: false; code: string }>,
+  ): Promise<void> {
+    if (!cart || couponPending) return;
+    setCouponPending(true);
+    setCouponRetry(false);
+    const result = await work();
+    setCouponPending(false);
+    if (!result.ok) {
+      setCouponRetry(true);
+      setError(IMP036J_COPY.RETRY);
+      return;
+    }
+    setCouponDraft(result.data.cart.manualCouponCode ?? "");
+    await applyCartMutation(result.data.cart);
+  }
+
+  async function handleApplyCoupon(): Promise<void> {
+    if (!cart) return;
+    await mutateCoupon(() =>
+      applyCartCoupon({
+        brandId,
+        couponCode: couponDraft,
+        expectedRevision: cart.revision,
+        sourceCommandId: crypto.randomUUID(),
+      }),
+    );
+  }
+
+  async function handleRemoveCoupon(): Promise<void> {
+    if (!cart) return;
+    await mutateCoupon(() =>
+      removeCartCoupon({
+        brandId,
+        expectedRevision: cart.revision,
+        sourceCommandId: crypto.randomUUID(),
+      }),
+    );
+  }
+
   async function handleCheckout(): Promise<void> {
-    if (pending || checkoutBlocked || !cart || cart.lines.length === 0) return;
+    if (pending || checkoutBlocked || couponPending || !cart || cart.lines.length === 0) return;
     setPending(true);
     const session = await fetchCustomerSession();
-    setPending(false);
     if (!session.ok || !session.data.authenticated) {
+      setPending(false);
       window.location.assign(loginUrlWithReturn("/order/checkout/"));
       return;
     }
+    const activationId = crypto.randomUUID();
+    window.sessionStorage.setItem("boba.cartActivationId", activationId);
+    await recordCartCheckoutActivation({ brandId, activationId });
+    setPending(false);
     window.location.assign("/order/checkout/");
   }
 
@@ -331,14 +396,55 @@ export function CartClient(props: { brandId: string }) {
   const presentationEstimate = menuLookups
     ? resolveCartPresentationEstimate(cart, menuLookups)
     : { complete: false as const, totalPaise: BigInt(0) };
-  const presentationLabel = formatCartEstimatePrimaryLabel(presentationEstimate);
-  const presentationAmount = presentationEstimate.complete
-    ? formatPresentationEstimateLabel(presentationEstimate.totalPaise)
-    : presentationLabel;
+  const explanation = parseCommercialExplanation(evaluation?.quote);
+  const reuseCheckout =
+    cart != null &&
+    canReuseCheckoutEvaluation({
+      checkout: activeCheckout,
+      cartRevision: cart.revision,
+    });
+  const serverMerchandise = merchandiseSubtotalFromQuote(evaluation?.quote);
+  const estimatedPaise =
+    serverMerchandise ??
+    (presentationEstimate.complete ? presentationEstimate.totalPaise.toString() : "0");
+  const reusedTotal = reuseCheckout
+    ? activeCheckout?.activeSnapshot?.grandTotalPaise ?? null
+    : null;
+  const amountKind = reusedTotal ? "current-checkout-total" : "estimated-subtotal";
+  const amountLabel =
+    amountKind === "current-checkout-total"
+      ? IMP036J_COPY.CURRENT_CHECKOUT_TOTAL
+      : IMP036J_COPY.ESTIMATED_SUBTOTAL;
+  const amountPaise = reusedTotal ?? estimatedPaise;
+  const deliveryChargePaise =
+    reuseCheckout && activeCheckout?.activeSnapshot
+      ? snapshotDeliveryChargePaise(activeCheckout.activeSnapshot)
+      : null;
   const serviceabilityNote = cartEvaluationCustomerCopy(
     evaluation,
     Boolean(deliveryContext.coordinates),
   );
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const session = await fetchCustomerSession();
+      if (!session.ok || !session.data.authenticated || !cart) return;
+      const active = await getActiveCheckout({ cartId: cart.id });
+      if (cancelled || !active.ok) return;
+      setActiveCheckout(active.data.checkout);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [cart]);
+
+  useEffect(() => {
+    if (!evaluation?.evaluationId || couponPending) return;
+    void postCommittedPresentationObservation(priceSummaryRef.current, {
+      evaluationId: evaluation.evaluationId,
+    });
+  }, [evaluation?.evaluationId, amountPaise, couponPending]);
 
   if (loading) {
     return (
@@ -439,6 +545,24 @@ export function CartClient(props: { brandId: string }) {
           </ul>
         ) : null}
 
+        {cart && cart.lines.length > 0 ? (
+          <CouponField
+            code={couponDraft}
+            appliedCode={cart.manualCouponCode}
+            pending={couponPending}
+            disabled={pending}
+            onCodeChange={setCouponDraft}
+            onApply={() => void handleApplyCoupon()}
+            onRemove={() => void handleRemoveCoupon()}
+            statusText={couponRetry ? IMP036J_COPY.RETRY : null}
+            statusTone={couponRetry ? "alert" : null}
+            retryVisible={couponRetry}
+            onRetry={() => void handleApplyCoupon()}
+            showSignIn={explanation?.submittedCouponResult?.status === "CUSTOMER_IDENTITY_REQUIRED"}
+            returnPath="/order/cart/"
+          />
+        ) : null}
+
         </section>
 
         {cart && cart.lines.length > 0 ? (
@@ -449,15 +573,33 @@ export function CartClient(props: { brandId: string }) {
             <h2 className="font-display text-[24px] uppercase tracking-wide text-[var(--text-primary)]">
               Order summary
             </h2>
-            <div className="mt-5">
-              <CartSummary estimate={presentationEstimate} itemCount={lineCount} />
+            <div className="mt-5" ref={priceSummaryRef}>
+              <CommercialOfferStack
+                explanation={explanation}
+                payableLabel={amountLabel}
+                payablePaise={amountPaise}
+                deliveryChargePaise={deliveryChargePaise}
+                fulfilmentMode={reuseCheckout ? activeCheckout?.fulfilmentMode ?? null : null}
+                waitingText={
+                  couponPending
+                    ? IMP036J_COPY.CHECKING
+                    : evaluation == null
+                      ? IMP036J_COPY.CHECKING_TOTAL
+                      : null
+                }
+              />
+              {amountKind === "estimated-subtotal" ? (
+                <p className="mt-2 font-body text-[12px] text-[var(--text-tertiary)]">
+                  {IMP036J_COPY.CART_NOT_FINAL}
+                </p>
+              ) : null}
             </div>
             <Button
               type="button"
               variant="primary"
               size="lg"
               className="mt-6 min-h-[52px] w-full rounded-lg"
-              disabled={pending || checkoutBlocked}
+              disabled={pending || couponPending || checkoutBlocked}
               onClick={() => void handleCheckout()}
             >
               {pending ? "Continuing…" : "Checkout"}
@@ -481,19 +623,22 @@ export function CartClient(props: { brandId: string }) {
         >
           <div className="flex items-center justify-between gap-3">
             <div className="min-w-0">
-              {presentationEstimate.complete ? (
-                <p className="font-body text-[11px] text-[var(--text-tertiary)]">Estimated subtotal</p>
-              ) : null}
+              <p className="font-body text-[11px] text-[var(--text-tertiary)]">{amountLabel}</p>
               <p className="font-body text-[18px] font-bold text-[var(--text-primary)]">
-                {presentationAmount}
+                {formatPaise(amountPaise)}
               </p>
+              {amountKind === "estimated-subtotal" ? (
+                <p className="font-body text-[11px] text-[var(--text-tertiary)]">
+                  {IMP036J_COPY.CART_NOT_FINAL}
+                </p>
+              ) : null}
             </div>
             <Button
               type="button"
               variant="primary"
               size="lg"
               className="min-h-[48px] shrink-0 rounded-lg px-6"
-              disabled={pending || checkoutBlocked}
+              disabled={pending || couponPending || checkoutBlocked}
               onClick={() => void handleCheckout()}
             >
               {pending ? "Continuing…" : "Checkout"}
@@ -530,4 +675,16 @@ function emptyMenu(brandId: string): CustomerMenuProjection {
     sections: [],
     items: [],
   };
+}
+
+function snapshotDeliveryChargePaise(snapshot: CommerceCheckout["activeSnapshot"]): string | null {
+  if (!snapshot || !Array.isArray(snapshot.charges)) return null;
+  for (const raw of snapshot.charges) {
+    if (typeof raw !== "object" || raw === null) continue;
+    const row = raw as Record<string, unknown>;
+    if (row.chargeCode === "delivery" && typeof row.amountPaise === "string") {
+      return BigInt(row.amountPaise) > BigInt(0) ? row.amountPaise : null;
+    }
+  }
+  return null;
 }

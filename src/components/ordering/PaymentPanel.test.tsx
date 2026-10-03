@@ -1402,4 +1402,14 @@ describe("PaymentPanel", () => {
     expect(screen.getByTestId("payment-start-new-order")).toBeInTheDocument();
     expect(screen.queryByTestId("payment-start")).not.toBeInTheDocument();
   });
+
+  it("PaymentPanel has a price summary and no coupon mutation controls", () => {
+    render(<PaymentPanel checkout={checkout} snapshot={snapshotBase} onOrderReady={vi.fn()} />);
+    expect(screen.getByTestId("price-summary")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Coupon")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("coupon-apply")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("coupon-change")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("coupon-remove")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("coupon-input")).not.toBeInTheDocument();
+  });
 });

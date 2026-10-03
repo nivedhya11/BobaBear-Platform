@@ -104,6 +104,12 @@ import {
   handleLocationReverseGeocode,
   handleLocationStatus,
 } from "../location/http";
+import {
+  CART_CHECKOUT_ACTIVATION_FIELDS,
+  COMMERCE_OBSERVATION_FIELDS,
+  persistCommerceObservation,
+  recordCartCheckoutActivationForAccess,
+} from "../measurement/observe-presentation";
 
 import {
   sendJson,
@@ -658,6 +664,58 @@ export async function routeCustomerCommerceRequest(
       return outcome("remove_cart_coupon", 200, "OK");
     }
 
+    if (pathname === "/api/v1/cart/checkout-activations") {
+      if (method !== "POST") {
+        sendMethodNotAllowed(res, ["POST"], requestId);
+        return outcome("record_cart_checkout_activation", 405, "METHOD_NOT_ALLOWED");
+      }
+      const body = await readBody(req, requestId, res, CART_CHECKOUT_ACTIVATION_FIELDS);
+      if (!body) return outcome("record_cart_checkout_activation", 400, "INVALID_REQUEST");
+      const brandId = requireBrandId(body.brandId);
+      const access = await buildCartAccess(deps, req, brandId);
+      if (typeof body.activationId !== "string") {
+        throw new CartError("CART_INVALID_INPUT", "activationId is required.", {
+          field: "activationId",
+        });
+      }
+      await recordCartCheckoutActivationForAccess(
+        deps.persistence,
+        access,
+        body.activationId,
+      );
+      sendJson(res, { ok: true }, { status: 200, requestId });
+      return outcome("record_cart_checkout_activation", 200, "OK");
+    }
+
+    if (pathname === "/api/v1/commerce-observations") {
+      if (method !== "POST") {
+        sendMethodNotAllowed(res, ["POST"], requestId);
+        return outcome("post_commerce_observation", 405, "METHOD_NOT_ALLOWED");
+      }
+      const body = await readBody(req, requestId, res, COMMERCE_OBSERVATION_FIELDS);
+      if (!body) return outcome("post_commerce_observation", 400, "INVALID_REQUEST");
+      const identity = await resolveOptionalTrustedIdentity(deps.runtime, req.headers);
+      const guestToken = extractGuestCartToken(req.headers);
+      const access = identity
+        ? {
+            kind: "customer" as const,
+            actor: toCartCustomerActor(identity),
+            brandId: "00000000-0000-4000-8000-000000000001",
+          }
+        : {
+            kind: "guest" as const,
+            brandId: "00000000-0000-4000-8000-000000000001",
+            ...(guestToken !== undefined ? { guestToken } : {}),
+          };
+      const observation = await persistCommerceObservation(
+        deps.persistence,
+        access,
+        body,
+      );
+      sendJson(res, { ok: true, observation }, { status: 200, requestId });
+      return outcome("post_commerce_observation", 200, "OK");
+    }
+
     if (pathname === "/api/v1/cart/evaluate" && method === "POST") {
       const bodyResult = await readOptionalJsonObjectBody(req, ["location", "brandId"]);
       if (!bodyResult.ok) {
@@ -748,7 +806,7 @@ export async function routeCustomerCommerceRequest(
     }
 
     if (pathname === "/api/v1/checkouts" && method === "POST") {
-      const body = await readBody(req, requestId, res, ["cartId"]);
+      const body = await readBody(req, requestId, res, ["cartId", "cartActivationId"]);
       if (!body) return outcome("start_checkout", 400, "INVALID_REQUEST");
       const identity = await requireTrustedIdentity(deps.runtime, req.headers);
       const actor = toCartCustomerActor(identity);

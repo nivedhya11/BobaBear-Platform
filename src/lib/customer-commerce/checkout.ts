@@ -13,6 +13,9 @@ type EvaluateEnvelope = Readonly<{
   ok: true;
   checkout: CommerceCheckout;
   snapshot: CommerceCheckoutSnapshot;
+  evaluationId?: string;
+  reviewSurfaceToken?: string;
+  quote?: { commercialExplanation?: unknown };
 }>;
 
 export async function getActiveCheckout(input: {
@@ -32,10 +35,13 @@ export async function getActiveCheckout(input: {
 
 export async function startCheckout(input: {
   cartId: string;
+  cartActivationId?: string;
 }): Promise<CommerceHttpResult<{ checkout: CommerceCheckout }>> {
+  const body: Record<string, unknown> = { cartId: input.cartId };
+  if (input.cartActivationId) body.cartActivationId = input.cartActivationId;
   const result = await commerceRequest<CheckoutEnvelope>("/api/v1/checkouts", {
     method: "POST",
-    body: { cartId: input.cartId },
+    body,
   });
   if (!result.ok) return result;
   if (!result.data.checkout) {
@@ -88,7 +94,13 @@ export async function evaluateCheckout(input: {
   checkoutId: string;
   expectedCheckoutRevision: string;
 }): Promise<
-  CommerceHttpResult<{ checkout: CommerceCheckout; snapshot: CommerceCheckoutSnapshot }>
+  CommerceHttpResult<{
+    checkout: CommerceCheckout;
+    snapshot: CommerceCheckoutSnapshot;
+    evaluationId?: string;
+    reviewSurfaceToken?: string;
+    quote?: { commercialExplanation?: unknown };
+  }>
 > {
   const result = await commerceRequest<EvaluateEnvelope>(
     `/api/v1/checkouts/${input.checkoutId}/evaluate`,
@@ -101,7 +113,13 @@ export async function evaluateCheckout(input: {
   return {
     ok: true,
     status: result.status,
-    data: { checkout: result.data.checkout, snapshot: result.data.snapshot },
+    data: {
+      checkout: result.data.checkout,
+      snapshot: result.data.snapshot,
+      evaluationId: result.data.evaluationId,
+      reviewSurfaceToken: result.data.reviewSurfaceToken,
+      quote: result.data.quote,
+    },
   };
 }
 

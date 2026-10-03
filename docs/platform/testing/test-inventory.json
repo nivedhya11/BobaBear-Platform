@@ -31,23 +31,23 @@
     "note": "Protected evidence and generated reports are never classified as executable test source."
   },
   "counts": {
-    "trackedPathsConsidered": 2242,
-    "executableTestFiles": 486,
-    "sourceTestFiles": 142,
-    "testsTreeExecutableFiles": 269,
+    "trackedPathsConsidered": 2252,
+    "executableTestFiles": 489,
+    "sourceTestFiles": 144,
+    "testsTreeExecutableFiles": 270,
     "scriptTestFiles": 75,
     "playwrightSpecs": 12,
     "vitestConfigs": 2,
     "playwrightConfigs": 7,
     "testSupportScripts": 51,
-    "packageTestCommands": 89,
+    "packageTestCommands": 90,
     "packageAuditCommands": 27,
     "packageE2eCommands": 9,
     "packageCheckCommands": 17,
     "packageCoverageCommands": 1,
     "packageInventoryCommands": 2,
     "ciWorkflowFiles": 4,
-    "ciValidationSteps": 121,
+    "ciValidationSteps": 122,
     "protectedEvidenceTrackedFiles": 3,
     "archiveTrackedFiles": 92
   },
@@ -91,6 +91,7 @@
     "src/components/ordering/checkout-snapshot-presentation.test.ts",
     "src/components/ordering/client-action.test.ts",
     "src/components/ordering/financial-document-presentation.test.ts",
+    "src/components/ordering/imp036j-tranche5-presentation.test.tsx",
     "src/components/ordering/order-status.test.ts",
     "src/components/ordering/order-support.test.ts",
     "src/components/ordering/payment-recovery-presentation.test.ts",
@@ -150,6 +151,7 @@
     "src/server/customer-auth/rate-limit/hashing.test.ts",
     "src/server/customer-auth/rate-limit/progressive.test.ts",
     "src/server/customer-commerce/http/helpers.test.ts",
+    "src/server/customer-commerce/measurement/compare-presentation.test.ts",
     "src/server/customer-commerce/menu/project-customer-menu.test.ts",
     "src/server/notifications/channels/non-sending.test.ts",
     "src/server/notifications/outbox-events.test.ts",
@@ -319,6 +321,7 @@
     "tests/database/imp036j-tranche1-commercial-persistence.integration.test.ts",
     "tests/database/imp036j-tranche2-measurement-persistence.integration.test.ts",
     "tests/database/imp036j-tranche4-commercial-commands.integration.test.ts",
+    "tests/database/imp036j-tranche5-customer-presentation.integration.test.ts",
     "tests/database/isolation.integration.test.ts",
     "tests/database/menu-import.integration.test.ts",
     "tests/database/migration-cli.integration.test.ts",
@@ -681,6 +684,7 @@
       "test:imp036j:tranche2",
       "test:imp036j:tranche3",
       "test:imp036j:tranche4",
+      "test:imp036j:tranche5",
       "test:menu-import",
       "test:menu-parity",
       "test:operations:http",
@@ -892,6 +896,7 @@
     "test:imp036j:tranche2": "node scripts/run-vitest.mjs run --config vitest.database.config.mts tests/database/imp036j-tranche2-measurement-persistence.integration.test.ts",
     "test:imp036j:tranche3": "node scripts/run-vitest.mjs run tests/promotions/imp036j-tranche3-commercial-evaluation.test.ts tests/promotions/engine.test.ts tests/promotions/fatal-and-money.test.ts tests/promotions/tax-integration.test.ts tests/promotions/bogo.test.ts tests/promotions/targets-modifiers.test.ts",
     "test:imp036j:tranche4": "node scripts/run-vitest.mjs run --config vitest.database.config.mts tests/database/imp036j-tranche4-commercial-commands.integration.test.ts",
+    "test:imp036j:tranche5": "node scripts/run-vitest.mjs run src/server/customer-commerce/measurement/compare-presentation.test.ts src/components/ordering/imp036j-tranche5-presentation.test.tsx && node scripts/run-vitest.mjs run --config vitest.database.config.mts tests/database/imp036j-tranche5-customer-presentation.integration.test.ts",
     "test:menu-import": "node scripts/run-vitest.mjs run --config vitest.database.config.mts tests/menu-import",
     "test:menu-parity": "node scripts/run-vitest.mjs run tests/menu-parity",
     "test:operations:http": "node scripts/run-vitest.mjs run --config vitest.database.config.mts tests/operations/store-http.integration.test.ts tests/operations/refunds-http.integration.test.ts tests/operations/orders-read-http.integration.test.ts tests/operations/orders-mutation-http.integration.test.ts tests/operations/notifications-http.integration.test.ts tests/operations/scheduling-http.tranche3.integration.test.ts tests/operations/scheduling-profile-workforce-journey.integration.test.ts",
@@ -1046,6 +1051,10 @@
         {
           "name": "IMP-036J Tranche 4 proof",
           "run": "npm run test:imp036j:tranche4"
+        },
+        {
+          "name": "IMP-036J Tranche 5 proof",
+          "run": "npm run test:imp036j:tranche5"
         },
         {
           "name": "Install dependencies",
@@ -3489,6 +3498,25 @@
       "classificationConfidence": "HEURISTIC"
     },
     {
+      "path": "src/components/ordering/imp036j-tranche5-presentation.test.tsx",
+      "runner": "vitest",
+      "domain": "components/ordering",
+      "testType": "component-or-tsx",
+      "dbRequired": "NO",
+      "browserRequired": "NO",
+      "externalProviderSubstitute": "UNKNOWN",
+      "packageCommands": [
+        "test",
+        "test:coverage",
+        "test:imp036j:tranche5"
+      ],
+      "ciInclusion": "YES",
+      "test1Layers": [
+        "2-component"
+      ],
+      "classificationConfidence": "HEURISTIC"
+    },
+    {
       "path": "src/components/ordering/order-status.test.ts",
       "runner": "vitest",
       "domain": "components/ordering",
@@ -4562,6 +4590,26 @@
       "packageCommands": [
         "test",
         "test:coverage"
+      ],
+      "ciInclusion": "YES",
+      "test1Layers": [
+        "1-unit",
+        "3-domain-use-case"
+      ],
+      "classificationConfidence": "HEURISTIC"
+    },
+    {
+      "path": "src/server/customer-commerce/measurement/compare-presentation.test.ts",
+      "runner": "vitest",
+      "domain": "server/customer-commerce",
+      "testType": "unit-or-domain",
+      "dbRequired": "NO",
+      "browserRequired": "NO",
+      "externalProviderSubstitute": "UNKNOWN",
+      "packageCommands": [
+        "test",
+        "test:coverage",
+        "test:imp036j:tranche5"
       ],
       "ciInclusion": "YES",
       "test1Layers": [
@@ -7617,6 +7665,24 @@
       "externalProviderSubstitute": "UNKNOWN",
       "packageCommands": [
         "test:imp036j:tranche4"
+      ],
+      "ciInclusion": "YES",
+      "test1Layers": [
+        "4-integration",
+        "5-database-integration"
+      ],
+      "classificationConfidence": "HEURISTIC"
+    },
+    {
+      "path": "tests/database/imp036j-tranche5-customer-presentation.integration.test.ts",
+      "runner": "vitest",
+      "domain": "database/imp036j-tranche5-customer-presentation",
+      "testType": "integration",
+      "dbRequired": "YES",
+      "browserRequired": "NO",
+      "externalProviderSubstitute": "UNKNOWN",
+      "packageCommands": [
+        "test:imp036j:tranche5"
       ],
       "ciInclusion": "YES",
       "test1Layers": [

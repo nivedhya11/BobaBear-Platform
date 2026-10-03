@@ -35,6 +35,7 @@ export type CommerceCartEvaluation = Readonly<{
   selectedOutletId?: string;
   problems?: readonly Readonly<{ cartLineId: string; code: string }>[];
   quote?: unknown;
+  evaluationId?: string;
   serviceabilityReason?: string;
 }>;
 
@@ -369,6 +370,7 @@ export type CommerceOrderLine = Readonly<{
   variantName: string;
   quantity: number;
   lineTotalMinor: string;
+  lineOrigin?: "cart" | "complimentary_offer";
   modifiers: readonly Readonly<{
     groupName: string;
     optionName: string;

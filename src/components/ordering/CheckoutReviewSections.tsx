@@ -1,6 +1,7 @@
 "use client";
 
 import { formatPaise } from "@/components/ordering/format-money";
+import { IMP036J_COPY } from "@/components/ordering/imp036j-copy";
 import type { CheckoutSnapshotLineRow } from "@/components/ordering/checkout-line-presentation";
 
 export function CheckoutSnapshotLineList(props: {
@@ -28,6 +29,11 @@ export function CheckoutSnapshotLineList(props: {
             <span className="text-[var(--text-primary)]">
               {line.quantity} × {line.productName}
               {line.variantName ? ` (${line.variantName})` : ""}
+              {line.lineOrigin === "complimentary_offer" ? (
+                <span className="mt-1 block font-body text-[12px] text-[var(--text-secondary)]">
+                  {IMP036J_COPY.INCLUDED}
+                </span>
+              ) : null}
             </span>
             <span className="shrink-0 font-semibold tabular-nums text-[var(--text-primary)]">
               {formatPaise(line.lineTotalPaise)}
